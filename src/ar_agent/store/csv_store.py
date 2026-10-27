@@ -1,6 +1,6 @@
 """CSV 实现 —— 模拟 PM 文档里的 Google Sheets 财务系统。
 
-CSV 的好处是演示时可以直接用 Excel 打开给面试官看"数据长这样、Agent 写回了什么"。
+CSV 可以直接用 Excel 打开，方便核对原始数据和 Agent 写回的内容。
 """
 from __future__ import annotations
 

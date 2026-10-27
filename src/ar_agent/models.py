@@ -162,6 +162,9 @@ class Message:
     invoice_id: str
     customer_id: str
     audience: str    # "customer" 对外 / "internal" 对内
+    # 渲染 body 时用到的结构化变量。WhatsApp 模板消息按 Meta 审批过的模板发送，
+    # 需要的是变量本身而不是渲染后的正文。
+    variables: dict = field(default_factory=dict)
 
 
 @dataclass

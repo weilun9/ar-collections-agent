@@ -198,6 +198,17 @@ def _guard(text: str, template_id: str) -> None:
             )
 
 
+#: WhatsApp 模板映射：本地模板 id → (Meta 审批模板名, 语言, 按 {{1}}{{2}}... 顺序的变量名)。
+#: 主动提醒几乎都在 24 小时会话窗口之外，Meta 只接受预审批模板，所以对客户的 WhatsApp
+#: 消息一律按模板发送。Meta 端的模板正文需与上面 TEMPLATES 中的 body 保持一致。
+WHATSAPP_META_TEMPLATES: dict[str, tuple[str, str, tuple[str, ...]]] = {
+    "WA_LOW_1": ("ar_reminder_1", "zh_CN",
+                 ("contact_name", "company", "invoice_id", "amount", "due_date", "payment_url")),
+    "WA_LOW_2": ("ar_reminder_2", "zh_CN",
+                 ("contact_name", "invoice_id", "amount", "due_date", "payment_url")),
+}
+
+
 def render(template_id: str, variables: dict) -> tuple[str, str]:
     """渲染模板，返回 (subject, body)。
 

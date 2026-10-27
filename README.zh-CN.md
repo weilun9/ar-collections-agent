@@ -105,13 +105,11 @@ ar-collections-agent/
 | `data/action_log.csv` | 审计日志，每条动作的 actor / 依据 / 命中策略 |
 | `data/outbox/*.json` | dry-run 模式下"发出"的消息全文 |
 
-这些都能直接用 Excel 打开 —— 演示时给对方看原始数据比看界面更有说服力。
+这些都能直接用 Excel 打开核对。
 
 ---
 
 ## 设计要点
-
-> 这一节是面试时真正会被追问的部分。
 
 ### 1. 判定权在规则层，解释权才交给模型
 
@@ -240,6 +238,9 @@ $env:AR_LIVE="1"; python ar.py scan
 > WhatsApp 生产注意：Meta 规定商家只能在客户 24 小时会话窗口内自由发文本，
 > 窗口外必须用预审批的 Message Template。这跟我们"只发预设模板"的 L2 约束刚好同向 ——
 > 平台合规要求和风险设计是一致的，不是额外负担。
+> 因此 live 模式下 WhatsApp 一律以 `type=template` 发送：先在 Meta 后台审批与
+> `templates.py` 中 `WA_*` 正文一致的模板，再在 `WHATSAPP_META_TEMPLATES` 里登记模板名和变量顺序。
+> 没有登记的模板会直接拒绝发送，不会退回自由文本。
 
 ### 换掉 CSV 存储
 
@@ -271,7 +272,7 @@ $env:AR_LLM_PROVIDER="ollama"; python ar.py demo
 
 ## 已知边界
 
-诚实标注，免得演示时被问住：
+以下是当前实现的已知限制：
 
 - **DSO 是代理指标**。严格 DSO 需要期间赊销收入，那个数字在 ERP 里、不在这张应收表上。
   这里用"金额加权平均在外天数"代替，周报里明确标注了口径。宁可标注清楚，不给一个看着精确的错数。

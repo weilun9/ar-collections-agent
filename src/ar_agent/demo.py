@@ -1,7 +1,6 @@
 """演示剧本 —— 一条命令跑完整条故事线。
 
-面试演示的问题在于：你手忙脚乱敲命令的时候，对方在等；等的时候他们就开始走神。
-所以把整个叙事固化成一个脚本，每一步先讲"接下来要证明什么"，再跑，再看结果。
+把完整流程固化成一个脚本，每一步先说明要验证什么，再运行并展示结果。
 
 13 幕，大约 5-8 分钟，覆盖：分级 → 自动跟进 → 48h 缓冲 → 人工接管
 → 关键词强制升级 → 高风险零外发 → 熔断 → 周报 → 风险边界自检。
@@ -53,7 +52,7 @@ def note(text: str) -> None:
 
 
 def show_outbox_one(match_invoice: str, label: str) -> None:
-    """从 outbox 里挑出一条消息，原样打印给面试官看。"""
+    """从 outbox 里挑出一条消息，原样打印出来。"""
     files = sorted((ROOT / "data" / "outbox").glob("*.json"))
     for f in reversed(files):
         d = json.loads(f.read_text(encoding="utf-8"))

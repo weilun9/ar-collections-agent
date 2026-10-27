@@ -337,11 +337,13 @@ class Orchestrator:
                 log(d.action.value, channel.name, to, template_id, "blocked", "0",
                     "渠道已熔断，跳过")
                 return False
-            subject, body = tpl.render(template_id, self._vars(d, now))
+            variables = self._vars(d, now)
+            subject, body = tpl.render(template_id, variables)
             msg = Message(
                 channel=channel.name, to=to, subject=subject, body=body,
                 template_id=template_id, invoice_id=inv.invoice_id,
                 customer_id=cust.customer_id, audience=channel.audience,
+                variables=variables,
             )
             res = channel.send(msg)
             tripped = self.breaker.record_send(channel.name, res.ok, now.date())

@@ -4,7 +4,7 @@
     GOOGLE_SERVICE_ACCOUNT_JSON=C:\path\to\sa.json
     GOOGLE_SHEET_ID=1AbC...
 
-L3 设计要点（面试可讲）：给这个 Service Account 授的是**表级共享 + 代码级字段白名单**双层限制。
+L3 设计要点：给这个 Service Account 授的是**表级共享 + 代码级字段白名单**双层限制。
 Sheets API 本身没有列级权限，所以字段白名单由 base.ReceivablesStore._assert_writable 在
 代码层强制；真正上生产应改用有列级权限的数据库视图，把这层下沉到数据库。
 """

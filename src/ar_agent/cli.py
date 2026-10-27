@@ -1,6 +1,6 @@
 """命令行入口。
 
-演示时最常用的三条：
+常用命令：
     python -m ar_agent.cli matrix          看分级矩阵（不产生任何动作）
     python -m ar_agent.cli scan            跑一次每日扫描
     python -m ar_agent.cli dashboard       打开可视化面板
@@ -79,7 +79,7 @@ def _rule(char: str = "─", n: int = 88) -> str:
 def _w(text: str) -> int:
     """终端显示宽度：中日韩字符占 2 格，其余占 1 格。
 
-    直接用 len() 排版会让含中文的表格全部错位 —— 演示时这个细节很显眼。
+    直接用 len() 排版会让含中文的表格全部错位。
     """
     return sum(2 if unicodedata.east_asian_width(c) in "WF" else 1 for c in text)
 
@@ -388,7 +388,7 @@ def cmd_reset_breaker(args) -> None:
 
 
 def cmd_verify(args) -> None:
-    """自检：把风险边界逐条跑一遍，输出通过/失败。演示时用来证明防线是真的。"""
+    """自检：把风险边界逐条跑一遍，输出通过/失败。"""
     from ar_agent.verify import run_checks
     run_checks(ROOT)
 
