@@ -1,0 +1,76 @@
+{
+  "_comment": "AR Collections Agent 运行配置。所有阈值外置，PM/财务可直接改本文件，无需改代码。",
+
+  "company": {
+    "name": "示例贸易有限公司",
+    "currency": "CNY",
+    "finance_lead_email": "finance-lead@example.com",
+    "cfo_email": "cfo@example.com",
+    "payment_portal_url": "https://pay.example.com/inv/"
+  },
+
+  "tiering": {
+    "_comment": "对应 PM 文档 §4 分级决策矩阵。命中任一 high 条件即高风险；否则命中任一 mid 条件即中度；否则逾期即轻度。",
+    "low": {
+      "overdue_days_min": 1,
+      "overdue_days_max": 14,
+      "amount_max": 50000,
+      "requires_clean_history": true
+    },
+    "mid": {
+      "overdue_days_min": 15,
+      "overdue_days_max": 30,
+      "amount_min": 50000,
+      "amount_max": 200000,
+      "prior_late_count_min": 1
+    },
+    "high": {
+      "overdue_days_min": 31,
+      "amount_min": 200000
+    }
+  },
+
+  "cadence": {
+    "_comment": "轻度分级的自动跟进节奏；中度分级的客户经理缓冲期。",
+    "low_first_reminder_after_days": 1,
+    "low_second_reminder_gap_days": 7,
+    "low_max_reminders": 2,
+    "mid_am_buffer_hours": 48
+  },
+
+  "policy": {
+    "_comment": "L4 运行时策略层。这些是硬规则，独立于 LLM 与 system prompt，命中即生效、不可被绕过。",
+    "hard_human_only_amount": 200000,
+    "vip_always_human": true,
+    "daily_send_cap": 50,
+    "terms_change_forces_high": true,
+    "dispute_forces_high": true
+  },
+
+  "breaker": {
+    "_comment": "L6 熔断机制。",
+    "max_invoices_per_scan": 200,
+    "consecutive_send_failures_to_pause": 5
+  },
+
+  "channels": {
+    "_comment": "live=false 时全部走 dry-run，消息只写入 data/outbox/，不会真的发出去。改为 true 还需同时提供 .env 凭据 + 设置 AR_LIVE=1，双重闸门。",
+    "whatsapp": { "live": false },
+    "gmail":    { "live": false },
+    "slack":    { "live": false }
+  },
+
+  "llm": {
+    "_comment": "只用于高风险告警里的沟通历史摘要，不参与任何决策。provider: none | ollama | anthropic；环境变量 AR_LLM_PROVIDER / AR_LLM_MODEL 可覆盖。失败或校验不通过时自动回退为原始记录。",
+    "provider": "none",
+    "model": "",
+    "ollama_base_url": "http://localhost:11434",
+    "timeout_seconds": 30,
+    "max_summary_chars": 300
+  },
+
+  "reporting": {
+    "weekly_report_weekday": 0,
+    "recipients": ["cfo@example.com", "finance-lead@example.com"]
+  }
+}

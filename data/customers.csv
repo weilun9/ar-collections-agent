@@ -1,0 +1,13 @@
+customer_id,name,contact_name,whatsapp,email,account_manager,am_slack_id,is_vip,prior_late_count,avg_days_to_pay,credit_terms_days
+C001,恒信机电,张伟,+8613800000101,zhang@hengxin.example,王磊,@wanglei,0,0,28,30
+C002,蓝海科技,李静,+8613800000102,lijing@lanhai.example,王磊,@wanglei,0,0,25,30
+C003,宏图建材,赵强,+8613800000103,zhaoq@hongtu.example,李娜,@lina,0,1,41,45
+C004,中远物流,孙敏,+8613800000104,sunmin@zhongyuan.example,李娜,@lina,1,0,30,45
+C005,佳诚电子,周涛,+8613800000105,zhout@jiacheng.example,陈晨,@chenchen,0,0,33,30
+C006,三江食品,吴丽,+8613800000106,wuli@sanjiang.example,陈晨,@chenchen,0,2,52,60
+C007,天成纺织,郑凯,+8613800000107,zhengk@tiancheng.example,王磊,@wanglei,0,0,36,30
+C008,瑞丰化工,冯洋,+8613800000108,fengy@ruifeng.example,李娜,@lina,0,0,29,30
+C009,金鼎五金,许倩,+8613800000109,xuqian@jinding.example,陈晨,@chenchen,0,1,47,45
+C010,华通汽配,何军,+8613800000110,hejun@huatong.example,王磊,@wanglei,1,0,27,60
+C011,星宇包装,曹雪,+8613800000111,caox@xingyu.example,李娜,@lina,0,0,31,30
+C012,德茂仪器,潘勇,+8613800000112,panyong@demao.example,陈晨,@chenchen,0,3,68,45

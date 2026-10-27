@@ -1,0 +1,382 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>应收账款 Agent · 健康度面板</title>
+<style>
+:root{
+  --bg:#f6f7f9; --panel:#fff; --ink:#0f172a; --muted:#64748b; --line:#e4e8ee;
+  --low:#16a34a; --mid:#d97706; --high:#dc2626; --agent:#2563eb; --human:#c026d3;
+  --lowbg:#f0fdf4; --midbg:#fffbeb; --highbg:#fef2f2;
+  --shadow:0 1px 2px rgba(15,23,42,.06),0 4px 12px rgba(15,23,42,.04);
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme=light]){
+    --bg:#0b1220; --panel:#131b2b; --ink:#e8edf5; --muted:#8b9ab1; --line:#243349;
+    --lowbg:#0f2318; --midbg:#2a1f08; --highbg:#2c1013;
+    --shadow:0 1px 2px rgba(0,0,0,.4),0 4px 14px rgba(0,0,0,.3);
+  }
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);
+  font:14px/1.6 -apple-system,"Segoe UI","Microsoft YaHei",system-ui,sans-serif}
+.wrap{max-width:1360px;margin:0 auto;padding:24px 20px 60px}
+
+header{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;
+  flex-wrap:wrap;margin-bottom:20px}
+h1{font-size:21px;margin:0;letter-spacing:-.01em}
+h1 small{display:block;font-size:12.5px;color:var(--muted);font-weight:400;margin-top:3px}
+.ctl{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.ctl label{font-size:12px;color:var(--muted)}
+input[type=date],select{background:var(--panel);color:var(--ink);border:1px solid var(--line);
+  border-radius:7px;padding:6px 9px;font:inherit;font-size:13px}
+button{background:var(--panel);color:var(--ink);border:1px solid var(--line);border-radius:7px;
+  padding:6px 12px;font:inherit;font-size:13px;cursor:pointer;transition:.12s}
+button:hover{border-color:var(--agent);color:var(--agent)}
+.badge-live{background:var(--highbg);color:var(--high);border:1px solid var(--high);
+  border-radius:999px;padding:3px 11px;font-size:12px;font-weight:600}
+.badge-dry{background:var(--panel);color:var(--muted);border:1px solid var(--line);
+  border-radius:999px;padding:3px 11px;font-size:12px}
+
+.grid{display:grid;gap:14px}
+.kpis{grid-template-columns:repeat(auto-fit,minmax(178px,1fr));margin-bottom:14px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:11px;
+  padding:15px 17px;box-shadow:var(--shadow)}
+.card .k{font-size:11.5px;color:var(--muted);letter-spacing:.02em;text-transform:none}
+.card .v{font-size:24px;font-weight:650;margin-top:5px;letter-spacing:-.02em;
+  font-variant-numeric:tabular-nums}
+.card .s{font-size:11.5px;color:var(--muted);margin-top:3px}
+
+.tiers{grid-template-columns:repeat(auto-fit,minmax(210px,1fr));margin-bottom:14px}
+.tier{border-radius:11px;padding:15px 17px;border:1px solid var(--line);box-shadow:var(--shadow)}
+.tier.low{background:var(--lowbg);border-color:var(--low)}
+.tier.mid{background:var(--midbg);border-color:var(--mid)}
+.tier.high{background:var(--highbg);border-color:var(--high)}
+.tier .t{font-size:13px;font-weight:600}
+.tier.low .t{color:var(--low)} .tier.mid .t{color:var(--mid)} .tier.high .t{color:var(--high)}
+.tier .n{font-size:27px;font-weight:700;margin-top:4px;font-variant-numeric:tabular-nums}
+.tier .a{font-size:12px;color:var(--muted)}
+.tier .d{font-size:11.5px;color:var(--muted);margin-top:7px;padding-top:7px;
+  border-top:1px solid var(--line)}
+
+.guard{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px}
+.g{flex:1;min-width:230px;background:var(--panel);border:1px solid var(--line);
+  border-left:3px solid var(--low);border-radius:9px;padding:12px 15px;box-shadow:var(--shadow)}
+.g.bad{border-left-color:var(--high)}
+.g .gk{font-size:12px;color:var(--muted)}
+.g .gv{font-size:17px;font-weight:650;margin-top:2px}
+.g.ok .gv{color:var(--low)} .g.bad .gv{color:var(--high)}
+
+.tabs{display:flex;gap:2px;border-bottom:1px solid var(--line);margin:22px 0 0;flex-wrap:wrap}
+.tab{padding:9px 15px;font-size:13.5px;cursor:pointer;color:var(--muted);
+  border-bottom:2px solid transparent;transition:.12s;user-select:none}
+.tab:hover{color:var(--ink)}
+.tab.on{color:var(--agent);border-bottom-color:var(--agent);font-weight:600}
+.pane{display:none;padding-top:16px} .pane.on{display:block}
+
+table{width:100%;border-collapse:collapse;font-size:13px}
+.scroll{overflow-x:auto;background:var(--panel);border:1px solid var(--line);
+  border-radius:11px;box-shadow:var(--shadow)}
+th{text-align:left;font-size:11.5px;color:var(--muted);font-weight:600;padding:10px 12px;
+  border-bottom:1px solid var(--line);white-space:nowrap;position:sticky;top:0;background:var(--panel)}
+td{padding:9px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+tr:last-child td{border-bottom:none}
+tbody tr{cursor:pointer;transition:.1s}
+tbody tr:hover{background:color-mix(in srgb,var(--agent) 5%,transparent)}
+.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.mono{font-family:ui-monospace,"Cascadia Mono",Consolas,monospace;font-size:12.5px}
+
+.pill{display:inline-block;padding:2px 9px;border-radius:999px;font-size:11.5px;
+  font-weight:600;white-space:nowrap}
+.pill.low{background:var(--lowbg);color:var(--low);border:1px solid var(--low)}
+.pill.mid{background:var(--midbg);color:var(--mid);border:1px solid var(--mid)}
+.pill.high{background:var(--highbg);color:var(--high);border:1px solid var(--high)}
+.pill.none{background:transparent;color:var(--muted);border:1px solid var(--line)}
+.vip{background:#faf5ff;color:#9333ea;border:1px solid #d8b4fe;padding:1px 6px;
+  border-radius:5px;font-size:10.5px;margin-left:5px;font-weight:600}
+@media (prefers-color-scheme:dark){:root:not([data-theme=light]) .vip{background:#2a1a3d}}
+.arrow{color:var(--high);font-size:11.5px;font-weight:600;white-space:nowrap}
+.hits{margin-top:5px}
+.hit{display:block;font-size:11.5px;color:var(--high);margin-top:2px}
+.why{display:block;font-size:11.5px;color:var(--muted);margin-top:2px}
+
+.msg{background:var(--panel);border:1px solid var(--line);border-radius:11px;
+  padding:0;margin-bottom:12px;overflow:hidden;box-shadow:var(--shadow)}
+.msg .h{padding:10px 15px;border-bottom:1px solid var(--line);display:flex;gap:10px;
+  align-items:center;flex-wrap:wrap;font-size:12.5px}
+.msg .b{padding:14px 16px;white-space:pre-wrap;font-size:13px;line-height:1.75}
+.chan{padding:2px 9px;border-radius:6px;font-size:11.5px;font-weight:600}
+.chan.out{background:var(--highbg);color:var(--high)}
+.chan.in{background:color-mix(in srgb,var(--agent) 12%,transparent);color:var(--agent)}
+
+.actor{padding:1px 8px;border-radius:5px;font-size:11px;font-weight:600}
+.actor.agent{background:color-mix(in srgb,var(--agent) 13%,transparent);color:var(--agent)}
+.actor.human{background:color-mix(in srgb,var(--human) 13%,transparent);color:var(--human)}
+.actor.system{background:color-mix(in srgb,var(--muted) 15%,transparent);color:var(--muted)}
+
+.note{font-size:12.5px;color:var(--muted);background:var(--panel);border:1px solid var(--line);
+  border-left:3px solid var(--agent);border-radius:8px;padding:11px 15px;margin-bottom:14px}
+.rule{background:var(--panel);border:1px solid var(--line);border-radius:9px;padding:12px 15px;
+  margin-bottom:9px;box-shadow:var(--shadow)}
+.rule .rid{color:var(--high);font-weight:700;font-family:ui-monospace,monospace;margin-right:9px}
+.bar{height:7px;background:var(--line);border-radius:4px;overflow:hidden;margin-top:6px}
+.bar i{display:block;height:100%;border-radius:4px}
+h3{font-size:14px;margin:22px 0 10px;color:var(--muted);font-weight:600}
+.empty{color:var(--muted);padding:26px;text-align:center;font-size:13px}
+#err{display:none;background:var(--highbg);color:var(--high);border:1px solid var(--high);
+  border-radius:9px;padding:12px 16px;margin-bottom:14px;font-size:13px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <h1>应收账款催收 Agent<small id="sub">加载中…</small></h1>
+  <div class="ctl">
+    <label for="d">扫描时点</label>
+    <input type="date" id="d">
+    <button id="reload">刷新</button>
+    <span id="mode" class="badge-dry">—</span>
+  </div>
+</header>
+
+<div id="err"></div>
+<div class="grid kpis" id="kpis"></div>
+<div class="grid tiers" id="tiers"></div>
+<div class="guard" id="guard"></div>
+
+<div class="tabs">
+  <div class="tab on" data-p="p-inv">账款与分级依据</div>
+  <div class="tab" data-p="p-out">Agent 发出的消息</div>
+  <div class="tab" data-p="p-log">审计日志</div>
+  <div class="tab" data-p="p-rep">客户回复</div>
+  <div class="tab" data-p="p-risk">风险边界设计</div>
+</div>
+
+<div class="pane on" id="p-inv">
+  <div class="note">
+    每一行都可以回答「为什么这么判」。<b>灰色</b>是分级引擎的客观依据，<b>红色 ⚑</b>
+    是 L4 运行时策略层的命中项 —— 后者跑在 LLM 之外，能覆盖前者的判断。
+    带「原判 →」箭头的行，就是策略层把分级引擎的结论改严了的账款。
+  </div>
+  <div class="scroll"><table>
+    <thead><tr>
+      <th>发票</th><th>客户</th><th class="num">金额</th><th class="num">逾期</th>
+      <th>分级</th><th>下一步动作</th><th>判定依据</th><th>状态</th>
+    </tr></thead>
+    <tbody id="tb-inv"></tbody>
+  </table></div>
+</div>
+
+<div class="pane" id="p-out">
+  <div class="note">
+    <b>红色 = 对客户发出</b>，<b>蓝色 = 只在内部</b>。这两类渠道在代码里是两个不同的基类，
+    对内模板从对外渠道发送会被直接拒绝。所有消息当前均为 dry-run，写入 <code>data/outbox/</code>。
+  </div>
+  <div id="outbox"></div>
+</div>
+
+<div class="pane" id="p-log">
+  <div class="note">
+    L5 可观测性：日志的第一等公民是 <b>actor</b> 字段 ——
+    财务和 CFO 随时能查「这条催收是 Agent 发的还是人工发的」。
+  </div>
+  <div class="scroll"><table>
+    <thead><tr><th>时间</th><th>谁</th><th>发票</th><th>动作</th><th>渠道</th>
+      <th>分级</th><th>依据 / 命中策略</th></tr></thead>
+    <tbody id="tb-log"></tbody>
+  </table></div>
+</div>
+
+<div class="pane" id="p-rep">
+  <div class="note">
+    客户回复的意图判定是<b>纯关键词规则，不经过 LLM</b>。命中「分期/打折/延期」或
+    「争议/法务」类别的，无条件强制升级为高风险并停止一切自动化 —— 规则不判断诉求是否合理，
+    命中即升级。这样它可审计、不可被话术绕过、且结果可复现。
+  </div>
+  <div class="scroll"><table>
+    <thead><tr><th>时间</th><th>发票</th><th>渠道</th><th>客户原话</th><th>意图判定</th></tr></thead>
+    <tbody id="tb-rep"></tbody>
+  </table></div>
+</div>
+
+<div class="pane" id="p-risk">
+  <h3>L4 运行时策略层 · 硬规则</h3>
+  <div class="note">
+    这些规则用 Python 实现，不读 prompt、不调模型。system prompt 里写的约束是软的
+    （可能被忽略、被注入绕过、在长上下文里遗忘），这一层是硬的：命中即执行，Agent 没有办法说服它。
+    每条规则只能让结果<b>更严格</b>，不能放宽 —— 这个单调性保证新增规则永远不会意外打开一个口子。
+  </div>
+  <div id="rules"></div>
+
+  <h3>L2 预设模板 · Agent 的话语权边界</h3>
+  <div class="note">
+    渲染函数的签名是 <code>render(template_id, variables)</code> —— <b>没有 body 参数</b>。
+    Agent 能选模板、能填金额日期，但无法凭空生成一句「我们同意贵司分期」。
+    这不是「要求它别这么做」，是它做不到。
+  </div>
+  <div id="tpls"></div>
+
+  <h3>发送前内容闸门 · 纵深防御第二层</h3>
+  <div class="note">假设第一层被绕过：模板被误改、变量注入带进危险措辞 —— 渲染完再扫一遍禁用词。</div>
+  <div id="forb"></div>
+</div>
+
+</div>
+<script>
+const $ = s => document.querySelector(s);
+const money = n => "¥" + Math.round(n).toLocaleString("zh-CN");
+const esc = s => String(s??"").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const TL = {low:"🟢 轻度", mid:"🟡 中度", high:"🔴 高风险", none:"— 未触发"};
+const AL = {
+  whatsapp_reminder:"WhatsApp 提醒", gmail_dunning:"邮件催收函",
+  slack_am_notice:"Slack 通知客户经理", gmail_finance_alert:"邮件告警财务",
+  slack_finance_alert:"Slack 告警财务", escalate:"升级人工（不外发）",
+  hold:"暂不动作", skip:"跳过", takeover:"人工接管", release:"交回 Agent",
+  mark_paid:"确认回款", weekly_report:"生成周报", breaker_tripped:"熔断触发",
+  batch_capped:"批量上限顺延"
+};
+const IL = {terms_change:"还款条件变更诉求", dispute:"账目争议 / 法务信号",
+  paid_claim:"客户声称已付款", ack:"确认收到 / 承诺付款", unknown:"未识别", "":"未处理"};
+
+let S = null;
+
+async function load(){
+  const d = $("#d").value;
+  $("#err").style.display = "none";
+  try{
+    const r = await fetch("/api/state" + (d ? "?date=" + d : ""));
+    const j = await r.json();
+    if(j.error) throw new Error(j.error);
+    S = j; render();
+  }catch(e){
+    $("#err").style.display = "block";
+    $("#err").textContent = "加载失败：" + e.message;
+  }
+}
+
+function render(){
+  $("#sub").textContent = `${S.company} · 扫描时点 ${S.as_of} · 生成于 ${S.generated_at.replace("T"," ")}`;
+  if(!$("#d").value) $("#d").value = S.as_of;
+
+  const live = S.live_channels.length > 0;
+  const m = $("#mode");
+  m.className = live ? "badge-live" : "badge-dry";
+  m.textContent = live ? "⚠ 实发模式：" + S.live_channels.join("/") : "dry-run · 不会真的发出";
+
+  const k = S.kpi, total = k.agent_actions + k.human_actions;
+  const autoPct = total ? Math.round(k.agent_actions / total * 100) : 0;
+  const odPct = k.open_amount ? (k.overdue_amount / k.open_amount * 100) : 0;
+  $("#kpis").innerHTML = [
+    ["未结清应收", money(k.open_amount), k.open_count + " 笔"],
+    ["其中已逾期", money(k.overdue_amount), `${k.overdue_count} 笔 · 占 ${odPct.toFixed(1)}%`],
+    ["DSO 代理指标", k.dso.toFixed(1) + " 天", "金额加权在外天数"],
+    ["逾期覆盖率", Math.round(k.coverage) + "%", "目标 100%（零漏单）"],
+    ["Agent 自主占比", autoPct + "%", `Agent ${k.agent_actions} · 人工 ${k.human_actions}`],
+    ["逾期后首次触达", k.first_touch_hours == null ? "样本不足" : k.first_touch_hours.toFixed(1) + " 小时",
+     k.first_touch_backlog ? `目标 <24h · 已剔除 ${k.first_touch_backlog} 笔上线前存量`
+                           : "目标 <24h（原 5-7 天）"],
+  ].map(([a,b,c]) => `<div class="card"><div class="k">${a}</div><div class="v">${b}</div><div class="s">${c}</div></div>`).join("");
+
+  const desc = {
+    low:"Agent 自动通过 WhatsApp 跟进，无需人工介入",
+    mid:"先 Slack 通知客户经理，留 48 小时优先处理权",
+    high:"仅通知人工，<b>不向客户发送任何消息</b>"
+  };
+  $("#tiers").innerHTML = ["low","mid","high"].map(t => {
+    const v = S.tiers[t];
+    return `<div class="tier ${t}"><div class="t">${TL[t]}</div>
+      <div class="n">${v.count} <span style="font-size:14px;font-weight:400">笔</span></div>
+      <div class="a">${money(v.amount)}</div><div class="d">${desc[t]}</div></div>`;
+  }).join("");
+
+  const g = S.guardrails;
+  $("#guard").innerHTML = [
+    ["VIP 客户被 Agent 自动催收", g.vip_auto_contacted, "目标 0 · 由策略规则 P-04 在运行时保证"],
+    ["错误升级（该转人工却自动对外）", g.wrong_escalations, "目标 0 · 高风险分级不触发任何对外动作"],
+  ].map(([a,v,s]) => `<div class="g ${v===0?"ok":"bad"}"><div class="gk">${a}</div>
+      <div class="gv">${v} 次 ${v===0?"✓ 达标":"⚠ 需复核"}</div>
+      <div class="gk" style="margin-top:3px">${s}</div></div>`).join("");
+
+  const ord = {high:0, mid:1, low:2, none:3};
+  const rows = [...S.invoices].sort((a,b) => ord[a.tier]-ord[b.tier] || b.amount-a.amount);
+  $("#tb-inv").innerHTML = rows.map(r => {
+    const why = r.reasons.map(x => `<span class="why">· ${esc(x)}</span>`).join("")
+              + r.policy_hits.map(x => `<span class="hit">⚑ ${esc(x)}</span>`).join("");
+    const days = r.status !== "open" ? "已结清" : (r.days_overdue >= 1 ? r.days_overdue + " 天" : "未逾期");
+    const moved = r.forced ? `<div class="arrow">${TL[r.base_tier]} → ${TL[r.tier]}</div>` : "";
+    let st = r.state;
+    if(r.state === "awaiting_am" && r.buffer_until)
+      st = `缓冲期至 ${r.buffer_until.slice(5,16).replace("T"," ")}`;
+    else st = ({new:"未处理", auto:"Agent 跟进中", awaiting_am:"等待客户经理",
+      human_taken:"人工已接管", escalated:"已升级人工", closed:"已结清", paused:"已暂停"})[r.state] || r.state;
+    return `<tr>
+      <td class="mono">${r.invoice_id}</td>
+      <td>${esc(r.customer)}${r.vip?'<span class="vip">VIP</span>':""}
+          <div class="why">${esc(r.account_manager)}${r.prior_late?` · 历史逾期 ${r.prior_late} 次`:""}</div></td>
+      <td class="num">${money(r.amount)}</td>
+      <td class="num">${days}</td>
+      <td><span class="pill ${r.tier}">${TL[r.tier]}</span>${moved}</td>
+      <td>${AL[r.action]||r.action}${r.may_contact?"":'<div class="hit">⚑ 禁止对外发送</div>'}</td>
+      <td>${why||'<span class="why">—</span>'}</td>
+      <td><span class="why">${esc(st)}${r.stage?` · 已提醒 ${r.stage} 次`:""}</span></td>
+    </tr>`;
+  }).join("");
+
+  $("#outbox").innerHTML = S.outbox.length ? [...S.outbox].reverse().map(o => {
+    const out = o.audience === "customer";
+    return `<div class="msg"><div class="h">
+      <span class="chan ${out?"out":"in"}">${o.channel} · ${out?"对客户":"对内部"}</span>
+      <b>→ ${esc(o.to)}</b>
+      <span class="why">模板 ${esc(o.template_id)} · ${esc(o.invoice_id||"—")} · ${esc(o.mode)} · ${esc((o.sent_at||"").replace("T"," "))}</span>
+    </div>${o.subject?`<div class="h"><b>主题：${esc(o.subject)}</b></div>`:""}
+    <div class="b">${esc(o.body)}</div></div>`;
+  }).join("") : '<div class="empty">outbox 为空 —— 先在终端跑一次 <code>python ar.py scan</code></div>';
+
+  const log = [...S.log].reverse().filter(r => !["hold","skip"].includes(r.action));
+  $("#tb-log").innerHTML = log.length ? log.map(r => `<tr>
+      <td class="mono">${esc((r.timestamp||"").slice(0,16).replace("T"," "))}</td>
+      <td><span class="actor ${r.actor}">${({agent:"Agent",human:"人工",system:"系统"})[r.actor]||r.actor}</span></td>
+      <td class="mono">${esc(r.invoice_id||"—")}</td>
+      <td>${AL[r.action]||esc(r.action)}</td>
+      <td>${esc(r.channel||"—")}${r.mode?`<div class="why">${esc(r.mode)}</div>`:""}</td>
+      <td>${r.tier?`<span class="pill ${r.tier}">${TL[r.tier]}</span>`:"—"}</td>
+      <td><span class="why">${esc(r.reasons||"")}</span>${r.policy_hits?`<span class="hit">⚑ ${esc(r.policy_hits)}</span>`:""}</td>
+    </tr>`).join("") : '<tr><td colspan="7" class="empty">暂无记录 —— 先跑一次 <code>python ar.py scan</code></td></tr>';
+
+  $("#tb-rep").innerHTML = S.replies.length ? S.replies.map(r => {
+    const forced = ["terms_change","dispute"].includes(r.intent);
+    return `<tr>
+      <td class="mono">${esc((r.received_at||"").slice(0,16).replace("T"," "))}</td>
+      <td class="mono">${esc(r.invoice_id)}</td><td>${esc(r.channel)}</td>
+      <td style="max-width:460px">${esc(r.text)}</td>
+      <td>${forced?'<span class="pill high">'+IL[r.intent]+'</span><div class="hit">⚑ 强制升级高风险</div>'
+        :'<span class="pill none">'+(IL[r.intent]||r.intent)+'</span>'}</td>
+    </tr>`;
+  }).join("") : '<tr><td colspan="5" class="empty">暂无客户回复</td></tr>';
+
+  $("#rules").innerHTML = S.rules.map(r =>
+    `<div class="rule"><span class="rid">${r.id}</span>${esc(r.description)}</div>`).join("");
+  $("#tpls").innerHTML = S.templates.map(t => {
+    const out = t.audience === "customer";
+    return `<div class="rule"><span class="chan ${out?"out":"in"}">${out?"对客户":"对内部"}</span>
+      <b class="mono" style="margin-left:8px">${t.id}</b>
+      <span class="why" style="display:inline;margin-left:8px">${t.channel}</span>
+      <div class="why" style="margin-top:5px">${esc(t.note)}</div></div>`;
+  }).join("");
+  $("#forb").innerHTML = S.forbidden.map(f => `<div class="rule">${esc(f)}</div>`).join("");
+}
+
+document.querySelectorAll(".tab").forEach(t => t.onclick = () => {
+  document.querySelectorAll(".tab").forEach(x => x.classList.remove("on"));
+  document.querySelectorAll(".pane").forEach(x => x.classList.remove("on"));
+  t.classList.add("on");
+  $("#" + t.dataset.p).classList.add("on");
+});
+$("#reload").onclick = load;
+$("#d").onchange = load;
+load();
+</script>
+</body>
+</html>

@@ -1,0 +1,10 @@
+.env
+__pycache__/
+*.py[cod]
+data/outbox/*.json
+data/action_log.csv
+data/breaker_state.json
+data/_verify_*.json
+reports/*.html
+reports/*.md
+.venv/
