@@ -61,12 +61,13 @@
   },
 
   "llm": {
-    "_comment": "Only used for the contact-history summary in high-risk alerts; takes no part in any decision. provider: none | ollama | anthropic; the AR_LLM_PROVIDER / AR_LLM_MODEL environment variables override it. Falls back to the raw records on failure or if the check fails.",
+    "_comment": "Used for the contact-history summary in high-risk alerts and the read-only `ask` assistant; takes no part in any decision. provider: none | ollama | anthropic; the AR_LLM_PROVIDER / AR_LLM_MODEL environment variables override it. Falls back to the raw records on failure or if the check fails.",
     "provider": "none",
     "model": "",
     "ollama_base_url": "http://localhost:11434",
     "timeout_seconds": 30,
-    "max_summary_chars": 300
+    "max_summary_chars": 300,
+    "max_tool_calls": 6
   },
 
   "reporting": {

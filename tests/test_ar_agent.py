@@ -424,12 +424,15 @@ class TestOrchestratorFlow(unittest.TestCase):
 
     def test_dry_plan_has_no_side_effects(self):
         import hashlib
-        paths = [self.tmp / "data" / "receivables.csv", self.tmp / "data" / "inbox.csv"]
-        before = [hashlib.md5(p.read_bytes()).hexdigest() for p in paths]
+
+        def digest():   # every file under data/, so a newly created file (e.g. breaker_state.json) also counts
+            return {str(p): hashlib.md5(p.read_bytes()).hexdigest()
+                    for p in sorted((self.tmp / "data").rglob("*")) if p.is_file()}
+        before = digest()
         n_out = len(list((self.tmp / "data" / "outbox").glob("*.json")))
         self.orc.daily_scan(now=datetime(2026, 8, 25, 9), dry_plan=True)
-        after = [hashlib.md5(p.read_bytes()).hexdigest() for p in paths]
-        self.assertEqual(before, after, "a dry plan must not change any data file")
+        after = digest()
+        self.assertEqual(before, after, "a dry plan must not change or create any data file")
         self.assertEqual(n_out, len(list((self.tmp / "data" / "outbox").glob("*.json"))),
                          "a dry plan must not produce any message")
 

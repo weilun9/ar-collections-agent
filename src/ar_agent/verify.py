@@ -44,7 +44,7 @@ class Checker:
         else:
             self.failed += 1
         mark = f"{GREEN}✓{RESET}" if ok else f"{RED}✗{RESET}"
-        print(f"  {mark} {_pad(layer, 6)}{_pad(name, 44)}{GREY}{detail}{RESET}")
+        print(f"  {mark} {_pad(layer, 6)}{_pad(name, 60)}{GREY}{detail}{RESET}")
 
 
 def run_checks(root: Path) -> int:
@@ -278,6 +278,24 @@ def run_checks(root: Path) -> int:
     c.check("L6", "Batch cap per scan holds", l6_batch_cap)
     c.check("L6", "Consecutive send failures pause, with no auto-recovery", l6_failure_pause)
     c.check("L6", "Breaker count persists across processes", l6_counter_persists)
+
+    # ---------------- Read-only assistant (function calling) ----------------
+    def llm_tools_read_only():
+        from .assistant import TOOLS, ToolBox
+
+        def digest():
+            return {p: p.read_bytes() for p in sorted((root / "data").rglob("*")) if p.is_file()}
+        box = ToolBox(root, cfg, datetime.now())
+        before = digest()
+        for t in TOOLS:
+            args = {"invoice_id": "INV-2019"} if "invoice_id" in t["parameters"]["required"] else {}
+            box.call(t["name"], args)
+        assert digest() == before, "an assistant tool call changed the data files"
+        result, ok = box.call("send_whatsapp", {"invoice_id": "INV-2019"})
+        assert not ok and "unknown tool" in result["error"], "a tool outside the allow-list was executed"
+        return f"{len(TOOLS)} tools, none can write; unlisted tools refused"
+
+    c.check("LLM", "Assistant tools are read-only; unlisted tools refused", llm_tools_read_only)
 
     # ---------------- Tiering engine invariants ----------------
     def tier_boundary():

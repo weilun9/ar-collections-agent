@@ -54,7 +54,7 @@ python ar.py demo
 | `python ar.py dashboard` | 可视化面板 → http://127.0.0.1:8787/ |
 | `python ar.py takeover INV-2010 --by 王磊` | 人工接管，Agent 立即停手 |
 | `python ar.py reply INV-2005 --text "能不能分三期"` | 模拟客户回复，触发强制升级 |
-| `python -m unittest discover -s tests` | 58 项单元测试 |
+| `python -m unittest discover -s tests` | 74 项单元测试 |
 
 推演时间线是最好用的演示手法：
 
@@ -92,7 +92,7 @@ ar-collections-agent/
 │  └─ demo.py               演示剧本
 ├─ dashboard/index.html     可视化面板
 ├─ data/                    CSV「财务系统」+ outbox + 审计日志
-└─ tests/                   58 项单元测试
+└─ tests/                   74 项单元测试
 ```
 
 ### 数据文件

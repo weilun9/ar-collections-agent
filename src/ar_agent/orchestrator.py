@@ -442,6 +442,8 @@ class Orchestrator:
         for inv in batch:
             cust = customers.get(inv.customer_id)
             if cust is None:
+                if dry_plan:
+                    continue
                 self.audit.write(
                     timestamp=now.isoformat(timespec="seconds"), run_id=report.run_id,
                     actor=Actor.SYSTEM.value, invoice_id=inv.invoice_id, action="skip",
@@ -457,7 +459,8 @@ class Orchestrator:
             if d.detail.get("halt") and not report.halted:
                 report.halted = True
                 report.halt_reason = f"daily customer send cap of {self.cfg.policy['daily_send_cap']} reached"
-                self._alert_breaker("all", report, now, report.halt_reason)
+                if not dry_plan:
+                    self._alert_breaker("all", report, now, report.halt_reason)
 
             if dry_plan:
                 continue
@@ -465,7 +468,8 @@ class Orchestrator:
             self.execute(d, report, now)
             sends_today = self.breaker.sends_on(now.date())
 
-        self.breaker.save()
+        if not dry_plan:
+            self.breaker.save()
         return report
 
     # ------------------------------------------------------------------ #

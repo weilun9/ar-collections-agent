@@ -393,6 +393,30 @@ def cmd_verify(args) -> None:
     run_checks(ROOT)
 
 
+def cmd_ask(args) -> None:
+    """Ask the read-only assistant a question; it answers by calling read-only tools."""
+    from ar_agent.assistant import Assistant
+    question = " ".join(args.question)
+    now = _parse_dt(args.date) or datetime.now()
+    res = Assistant(ROOT, Config.load(ROOT / "config.json"), now=now).ask(question)
+    if res.source == "disabled":
+        raise SystemExit(f"{res.note}\n  e.g. PowerShell: $env:AR_LLM_PROVIDER='ollama'; $env:AR_LLM_MODEL='qwen3.5:9b'")
+    print(f"\n{BOLD}Q:{RESET} {question}\n")
+    if res.source == "llm":
+        print(res.answer)
+    else:
+        print(f"{YELLOW}{res.note}{RESET}")
+        if res.answer:
+            print(f"{DIM}Data retrieved:{RESET}\n{res.answer}")
+    def fmt(c) -> str:
+        shown = ", ".join(f"{k}={v}" for k, v in c.args.items()) if isinstance(c.args, dict) else str(c.args or "")
+        return f"{GREEN if c.ok else RED}{c.name}{RESET}({shown})"
+
+    if res.calls:
+        print(f"\n{DIM}tools used:{RESET} " + "  ".join(fmt(c) for c in res.calls))
+    print(f"{DIM}read-only: the assistant has no tool that sends, writes or marks anything{RESET}\n")
+
+
 def cmd_demo(args) -> None:
     from ar_agent.demo import run_demo
     run_demo(ROOT, pause=not args.no_pause)
@@ -416,7 +440,8 @@ def build_parser() -> argparse.ArgumentParser:
   python -m ar_agent.cli outbox            see what the agent sent
   python -m ar_agent.cli report            generate the CFO weekly report
   python -m ar_agent.cli dashboard         open the web dashboard
-  python -m ar_agent.cli demo              run the full guided demo
+  python -m ar_agent.cli ask "..."         ask the read-only assistant (needs AR_LLM_PROVIDER)
+  python -m ar_agent.cli demo             run the full guided demo
 """)
     sub = p.add_subparsers(dest="cmd", required=True)
 
@@ -487,6 +512,11 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("demo", help="run the full guided demo")
     s.add_argument("--no-pause", action="store_true", help="run straight through without waiting for Enter")
     s.set_defaults(func=cmd_demo)
+
+    s = sub.add_parser("ask", help="ask the read-only assistant a question (LLM with read-only tools)")
+    s.add_argument("question", nargs="+", help='e.g. "Which high-risk invoices are over 30 days overdue?"')
+    s.add_argument("--date", help="answer as of this scan time")
+    s.set_defaults(func=cmd_ask)
 
     s = sub.add_parser("dashboard", help="start the web dashboard")
     s.add_argument("--port", type=int, default=8787)
