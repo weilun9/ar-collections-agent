@@ -85,7 +85,7 @@ tr:last-child td{border-bottom:none}
 tbody tr{cursor:pointer;transition:.1s}
 tbody tr:hover{background:color-mix(in srgb,var(--agent) 5%,transparent)}
 .num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
-.mono{font-family:ui-monospace,"Cascadia Mono",Consolas,monospace;font-size:12.5px}
+.mono{font-family:ui-monospace,"Cascadia Mono",Consolas,monospace;font-size:12.5px;white-space:nowrap}
 
 .pill{display:inline-block;padding:2px 9px;border-radius:999px;font-size:11.5px;
   font-weight:600;white-space:nowrap}
@@ -376,6 +376,9 @@ document.querySelectorAll(".tab").forEach(t => t.onclick = () => {
 });
 $("#reload").onclick = load;
 $("#d").onchange = load;
+// ?date=YYYY-MM-DD opens the dashboard at that scan time, so a view can be shared as a link
+const qd = new URLSearchParams(location.search).get("date");
+if (qd && /^\d{4}-\d{2}-\d{2}$/.test(qd)) $("#d").value = qd;
 load();
 </script>
 </body>
