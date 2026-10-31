@@ -1,13 +1,13 @@
-"""本地可视化面板。
+"""Local web dashboard.
 
-用标准库 http.server，不引 Flask/FastAPI —— 演示环境少一个依赖就少一个出错的可能。
-后端只吐 JSON，页面在 dashboard/index.html。
+Uses the standard-library http.server rather than Flask/FastAPI: one less dependency is one less thing to break.
+The back end only returns JSON; the page is dashboard/index.html.
 
-面板要回答的四个问题（就是财务和 CFO 真正会问的四个）：
-    1. 现在有多少钱在外面、多危险？      → KPI + 账龄
-    2. 每一条为什么被这么判？             → 账款表 + 分级依据 + 命中策略
-    3. Agent 到底对客户说了什么？         → outbox 原文
-    4. 有没有为了效率牺牲客户关系？       → 护栏指标
+The four questions the dashboard answers (the four that finance and the CFO actually ask):
+    1. How much money is outstanding, and how risky is it?   -> KPIs + ageing
+    2. Why was each invoice tiered the way it was?          -> invoice table + tier reasons + policy hits
+    3. What exactly did the agent say to customers?          -> outbox messages
+    4. Did efficiency cost us customer relationships?        -> guardrail metrics
 """
 from __future__ import annotations
 
@@ -36,7 +36,7 @@ def build_state(root: Path, as_of: date | None = None) -> dict:
     now = datetime.combine(as_of, datetime.min.time()).replace(hour=9)
 
     customers = orc.store.load_customers()
-    plan = orc.daily_scan(now=now, dry_plan=True)      # 预演，不写不发
+    plan = orc.daily_scan(now=now, dry_plan=True)      # dry plan: no writes, no sends
     metrics = report_mod.compute(root, cfg, as_of)
     log = AuditLog(root / "data" / "action_log.csv").read_all()
 
@@ -130,7 +130,7 @@ class Handler(BaseHTTPRequestHandler):
     root: Path = Path(".")
 
     def log_message(self, fmt, *args):                          # noqa: A003
-        pass                                                    # 静音，别刷屏
+        pass                                                    # keep the console quiet
 
     def _send(self, code: int, body: bytes, ctype: str) -> None:
         self.send_response(code)
@@ -171,14 +171,14 @@ def serve(root: Path, port: int = 8787, open_browser: bool = True) -> None:
     url = f"http://127.0.0.1:{port}/"
     httpd = ThreadingHTTPServer(("127.0.0.1", port), handler)
 
-    print(f"\n\033[1m应收账款 Agent · 可视化面板\033[0m")
+    print(f"\n\033[1mAR Collections Agent · Dashboard\033[0m")
     print(f"  {url}")
-    print(f"  \033[2m只监听本机回环地址，数据不出这台电脑。Ctrl+C 停止。\033[0m\n")
+    print(f"  \033[2mListening on localhost only; no data leaves this machine. Ctrl+C to stop.\033[0m\n")
 
     if open_browser:
         threading.Timer(0.6, lambda: webbrowser.open(url)).start()
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
-        print("\n面板已停止。")
+        print("\nDashboard stopped.")
         httpd.shutdown()

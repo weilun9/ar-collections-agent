@@ -1,13 +1,13 @@
-"""AR Collections Agent —— 应收账款催收 Agent。
+"""AR Collections Agent: an accounts-receivable collections agent.
 
-模块地图（对应 PM 文档章节）：
-    tiering.py    §4   分级决策矩阵
-    policy.py     §5   L4 运行时策略层（硬规则，独立于 LLM）
-    breaker.py    §5   L6 熔断机制
-    templates.py  §5   L2 工具设计（只能发预设模板）
-    inbound.py    §4.2 关键词驱动的强制人工升级
-    orchestrator  §3.1 每日扫描主流程
-    report.py     §3.1 周报层
+Module map (with the matching section of the product spec):
+    tiering.py    §4   tiering decision matrix
+    policy.py     §5   L4 runtime policy layer (hard rules, independent of the LLM)
+    breaker.py    §5   L6 circuit breakers
+    templates.py  §5   L2 tool design (only pre-approved templates can be sent)
+    inbound.py    §4.2 keyword-driven forced escalation to a person
+    orchestrator  §3.1 daily scan pipeline
+    report.py     §3.1 weekly report
 """
 
 __version__ = "1.0.0"

@@ -1,12 +1,12 @@
-"""Gmail —— 两种用途，所以有两个类。
+"""Gmail: two uses, so two classes.
 
-    GmailCustomerChannel  → 对客户发正式催收函（中度分级）
-    GmailInternalChannel  → 对财务负责人/CFO 发高风险告警与周报
+    GmailCustomerChannel  -> formal dunning letters to customers (medium tier)
+    GmailInternalChannel  -> high-risk alerts and the weekly report to the finance lead / CFO
 
-同一个底层传输，却拆成两个类，是为了让"对外"和"对内"在类型上不可混用
-（见 base.py 的设计说明）。共用逻辑放在 _GmailTransport 里，不重复。
+One transport, split into two classes so that customer-facing and internal sending cannot be mixed up by type
+(see the design note in base.py). The shared logic lives in _GmailTransport.
 
-真实接入用 SMTP + 应用专用密码（比 OAuth 少一大堆授权步骤，演示够用）：
+Live sending uses SMTP with an app password (far fewer authorisation steps than OAuth):
     GMAIL_SMTP_HOST=smtp.gmail.com
     GMAIL_SMTP_PORT=587
     GMAIL_USER=ar-agent@yourdomain.com
@@ -22,7 +22,7 @@ from ..models import Message, SendResult
 
 
 class _GmailTransport:
-    """SMTP 发送逻辑，被对外/对内两个渠道类共用。"""
+    """SMTP sending, shared by the customer-facing and internal channel classes."""
 
     @staticmethod
     def deliver(msg: Message, channel_name: str) -> SendResult:
@@ -34,17 +34,17 @@ class _GmailTransport:
         mail = EmailMessage()
         mail["From"] = user
         mail["To"] = msg.to
-        mail["Subject"] = msg.subject or "(无主题)"
+        mail["Subject"] = msg.subject or "(no subject)"
         mail.set_content(msg.body)
 
         with smtplib.SMTP(host, port, timeout=20) as smtp:
             smtp.starttls()
             smtp.login(user, password)
             smtp.send_message(mail)
-        return SendResult(True, channel_name, msg.to, "live", "已发送")
+        return SendResult(True, channel_name, msg.to, "live", "sent")
 
 
-# 延迟导入避免循环
+# Imported late to avoid a circular import
 from .base import CustomerChannel, InternalChannel  # noqa: E402
 
 

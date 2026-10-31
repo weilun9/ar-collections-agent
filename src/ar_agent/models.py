@@ -1,4 +1,4 @@
-"""领域模型。"""
+"""Domain model."""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -8,15 +8,15 @@ from typing import Any
 
 
 class Tier(str, Enum):
-    """风险分级（PM 文档 §4）。"""
-    NONE = "none"     # 未到期 / 已结清，不进入催收流
-    LOW = "low"       # 🟢 轻度 —— Agent 自主处理
-    MID = "mid"       # 🟡 中度 —— 先通知客户经理，48h 缓冲后 Agent 补位
-    HIGH = "high"     # 🔴 高风险 —— 纯人工，Agent 不对外发送任何消息
+    """Risk tier (product spec §4)."""
+    NONE = "none"     # not yet due / settled; not in the collections flow
+    LOW = "low"       # 🟢 light: handled by the agent
+    MID = "mid"       # 🟡 medium: account manager notified first; agent steps in after a 48h buffer
+    HIGH = "high"     # 🔴 high risk: people only; the agent sends nothing to the customer
 
     @property
     def label(self) -> str:
-        return {"none": "—", "low": "🟢 轻度", "mid": "🟡 中度", "high": "🔴 高风险"}[self.value]
+        return {"none": "—", "low": "🟢 Light", "mid": "🟡 Medium", "high": "🔴 High risk"}[self.value]
 
     @property
     def rank(self) -> int:
@@ -24,14 +24,14 @@ class Tier(str, Enum):
 
 
 class AgentState(str, Enum):
-    """账款在 Agent 流程里的状态机位置。"""
-    NEW = "new"                    # 尚未被处理过
-    AUTO = "auto"                  # 轻度，Agent 自动跟进中
-    AWAITING_AM = "awaiting_am"    # 中度，已通知客户经理，48h 缓冲期计时中
-    HUMAN_TAKEN = "human_taken"    # 客户经理/财务已接管，Agent 停止一切动作
-    ESCALATED = "escalated"        # 已升级人工（高风险 / 关键词强制升级）
-    PAUSED = "paused"              # 被熔断或策略暂停
-    CLOSED = "closed"              # 已结清
+    """Where an invoice sits in the agent's state machine."""
+    NEW = "new"                    # not handled yet
+    AUTO = "auto"                  # light tier, agent following up automatically
+    AWAITING_AM = "awaiting_am"    # medium tier, account manager notified, 48h buffer running
+    HUMAN_TAKEN = "human_taken"    # account manager / finance has taken over; the agent stops all actions
+    ESCALATED = "escalated"        # escalated to a person (high risk / forced by keywords)
+    PAUSED = "paused"              # paused by a circuit breaker or policy
+    CLOSED = "closed"              # settled
 
 
 class ActionType(str, Enum):
@@ -41,13 +41,13 @@ class ActionType(str, Enum):
     SLACK_FINANCE_ALERT = "slack_finance_alert"
     GMAIL_FINANCE_ALERT = "gmail_finance_alert"
     ESCALATE = "escalate"
-    HOLD = "hold"                  # 本轮不动作（缓冲期未到 / 已接管等）
+    HOLD = "hold"                  # no action this run (buffer not over / taken over, etc.)
     SKIP = "skip"
     WEEKLY_REPORT = "weekly_report"
 
 
 class Actor(str, Enum):
-    """L5 可观测性核心字段：这条动作到底是谁做的。"""
+    """Core L5 observability field: who actually performed this action."""
     AGENT = "agent"
     HUMAN = "human"
     SYSTEM = "system"
@@ -86,7 +86,7 @@ class Customer:
 
 @dataclass
 class Invoice:
-    # ---- 业务主数据：Agent 只读，无写权限（L3 IAM）----
+    # ---- Business master data: read-only for the agent, no write permission (L3 IAM) ----
     invoice_id: str
     customer_id: str
     amount: float
@@ -95,13 +95,13 @@ class Invoice:
     status: str              # open / paid / disputed
     paid_date: date | None
 
-    # ---- Agent 状态字段：Agent 唯一有写权限的列（L3 IAM）----
+    # ---- Agent state fields: the only columns the agent may write (L3 IAM) ----
     agent_tier: str = ""
-    agent_stage: int = 0             # 已发出的自动提醒次数
+    agent_stage: int = 0             # number of automatic reminders sent
     agent_state: str = AgentState.NEW.value
     agent_last_action_at: str = ""
-    agent_buffer_until: str = ""     # 中度分级的 48h 缓冲期截止时间
-    agent_owner: str = ""            # 接管人（客户经理 / 财务）
+    agent_buffer_until: str = ""     # end of the 48h buffer for medium-tier invoices
+    agent_owner: str = ""            # who took over (account manager / finance)
     agent_note: str = ""
 
     def days_overdue(self, today: date) -> int:
@@ -136,11 +136,11 @@ class Invoice:
 
 @dataclass
 class Decision:
-    """一条账款经过分级 + 策略层后的最终裁决。"""
+    """Final verdict for one invoice after tiering and the policy layer."""
     invoice: Invoice
     customer: Customer
     tier: Tier
-    base_tier: Tier                       # 策略层介入前，纯分级引擎给出的等级
+    base_tier: Tier                       # tier from the tiering engine alone, before the policy layer
     action: ActionType
     reasons: list[str] = field(default_factory=list)
     policy_hits: list[str] = field(default_factory=list)
@@ -153,7 +153,7 @@ class Decision:
 
 @dataclass
 class Message:
-    """待发送消息。注意：body 由模板渲染产生，调用方无法自由传入正文。"""
+    """An outgoing message. Note: body is rendered from a template; callers cannot pass free text."""
     channel: str
     to: str
     subject: str
@@ -161,9 +161,9 @@ class Message:
     template_id: str
     invoice_id: str
     customer_id: str
-    audience: str    # "customer" 对外 / "internal" 对内
-    # 渲染 body 时用到的结构化变量。WhatsApp 模板消息按 Meta 审批过的模板发送，
-    # 需要的是变量本身而不是渲染后的正文。
+    audience: str    # "customer" (external) / "internal"
+    # Structured variables used to render body. WhatsApp template messages are sent using the template approved
+    # on Meta's side, so they need the variables themselves rather than the rendered text.
     variables: dict = field(default_factory=dict)
 
 

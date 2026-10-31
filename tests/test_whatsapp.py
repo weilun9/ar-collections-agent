@@ -1,4 +1,4 @@
-"""WhatsApp 渠道：live 发送必须走 Meta 预审批模板，且无映射时拒绝发送。"""
+"""WhatsApp channel: live sends must use Meta pre-approved templates, and are refused when no template is mapped."""
 from __future__ import annotations
 
 import string

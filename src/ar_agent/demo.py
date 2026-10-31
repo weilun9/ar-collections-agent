@@ -1,9 +1,9 @@
-"""演示剧本 —— 一条命令跑完整条故事线。
+"""Guided demo: the whole story line in one command.
 
-把完整流程固化成一个脚本，每一步先说明要验证什么，再运行并展示结果。
+The full flow is fixed in a script; each step first says what it is checking, then runs and shows the result.
 
-13 幕，大约 5-8 分钟，覆盖：分级 → 自动跟进 → 48h 缓冲 → 人工接管
-→ 关键词强制升级 → 高风险零外发 → 熔断 → 周报 → 风险边界自检。
+13 scenes, about 5-8 minutes, covering: tiering -> automatic follow-up -> 48h buffer -> human takeover
+-> forced keyword escalation -> zero customer messages on high risk -> circuit breakers -> weekly report -> risk-boundary self-check.
 """
 from __future__ import annotations
 
@@ -22,10 +22,10 @@ STEP = 0
 
 
 def _run(*args: str) -> None:
-    """跑一条 CLI 命令，输出直通终端（保留颜色）。
+    """Run one CLI command with its output going straight to the terminal (colours kept).
 
-    先 flush：子进程直接写终端 fd，而本进程的 print 在管道下是块缓冲的。
-    不 flush 的话，旁白会全部堆到最后才出现，演示节奏就散了。
+    Flush first: the child process writes to the terminal directly, while this process's print is block-buffered under a pipe.
+    Without the flush, all the narration would pile up at the end and the demo would lose its pacing.
     """
     sys.stdout.flush()
     subprocess.run([sys.executable, str(ROOT / "ar.py"), *args], check=False)
@@ -36,13 +36,13 @@ def scene(title: str, why: str) -> None:
     global STEP
     STEP += 1
     print(f"\n{GREY}{'═' * 88}{RESET}")
-    print(f"{BOLD}第 {STEP} 幕　{title}{RESET}")
+    print(f"{BOLD}Scene {STEP}   {title}{RESET}")
     print(f"{DIM}{why}{RESET}")
     print(f"{GREY}{'─' * 88}{RESET}")
     sys.stdout.flush()
     if PAUSE:
         try:
-            input(f"{GREY}　按回车继续…{RESET}")
+            input(f"{GREY}   Press Enter to continue…{RESET}")
         except (EOFError, KeyboardInterrupt):
             raise SystemExit(0)
 
@@ -52,23 +52,23 @@ def note(text: str) -> None:
 
 
 def show_outbox_one(match_invoice: str, label: str) -> None:
-    """从 outbox 里挑出一条消息，原样打印出来。"""
+    """Pick one message from the outbox and print it as is."""
     files = sorted((ROOT / "data" / "outbox").glob("*.json"))
     for f in reversed(files):
         d = json.loads(f.read_text(encoding="utf-8"))
         if d.get("invoice_id") == match_invoice:
             out = d["audience"] == "customer"
             color = RED if out else BLUE
-            print(f"\n{color}【{label}】{RESET} {d['channel']} → {BOLD}{d['to']}{RESET}"
-                  f"　{DIM}模板 {d['template_id']}{RESET}")
+            print(f"\n{color}[{label}]{RESET} {d['channel']} → {BOLD}{d['to']}{RESET}"
+                  f"   {DIM}template {d['template_id']}{RESET}")
             if d.get("subject"):
-                print(f"{BOLD}主题：{d['subject']}{RESET}")
+                print(f"{BOLD}Subject: {d['subject']}{RESET}")
             print(f"{GREY}{'┈' * 84}{RESET}")
             print(d["body"])
             print(f"{GREY}{'┈' * 84}{RESET}")
             sys.stdout.flush()
             return
-    print(f"{DIM}（未找到 {match_invoice} 的消息）{RESET}")
+    print(f"{DIM}(no message found for {match_invoice}){RESET}")
 
 
 def run_demo(root: Path, pause: bool = True) -> None:
@@ -77,101 +77,101 @@ def run_demo(root: Path, pause: bool = True) -> None:
 
     anchor = "2026-08-25"
 
-    print(f"\n{BOLD}应收账款催收 Agent · 演示{RESET}")
-    print(f"{DIM}虚拟场景：B2B 贸易企业，300+ 企业客户，账期 30-60 天，财务 2 人 + 销售 20 人。")
-    print(f"演示锚点日 {anchor}，全程 dry-run —— 不会向任何真实客户发送消息。{RESET}")
+    print(f"\n{BOLD}AR Collections Agent · Demo{RESET}")
+    print(f"{DIM}Simulated scenario: a B2B trading company, 300+ business customers, 30-60 day terms, 2 finance staff + 20 sales staff.")
+    print(f"Demo anchor day {anchor}, dry-run throughout: nothing is sent to any real customer.{RESET}")
 
     # ---------------------------------------------------------------- #
-    scene("初始化：30 笔模拟账款",
-          "这 30 笔不是随机造的，是按决策矩阵的每一格 + 每一条策略规则刻意设计的，"
-          "所以待会儿任何一条你都可以指着问「这条为什么这么判」。")
+    scene("Setup: 30 simulated invoices",
+          "These 30 are not random: they are designed to hit every cell of the decision matrix and every policy rule, "
+          "so you can point at any one of them and ask why it was tiered that way.")
     _run("seed", "--today", anchor)
 
     # ---------------------------------------------------------------- #
-    scene("分级引擎：30 笔账款，三档风险",
-          "先看判定结果，不产生任何动作。注意最后一段「被 L4 策略层强制升级」的账款 —— "
-          "那是分级引擎本来判得更轻、被运行时策略层改严了的。")
+    scene("Tiering engine: 30 invoices, three risk tiers",
+          "First the decisions alone, with no actions. Note the last section, invoices forced up by the L4 policy layer: "
+          "the tiering engine rated them lower and the runtime policy layer made them stricter.")
     _run("matrix", "--date", anchor)
 
     # ---------------------------------------------------------------- #
-    scene("第一次每日扫描",
-          "轻度自动发 WhatsApp；中度先 Slack 通知客户经理并进入 48 小时缓冲期；"
-          "高风险只通知内部，不对客户发任何东西。")
+    scene("First daily scan",
+          "Light tier gets a WhatsApp message; medium first notifies the account manager on Slack and starts a 48-hour buffer; "
+          "high risk only notifies the team and sends nothing to the customer.")
     _run("scan", "--date", f"{anchor} 09:00")
 
     # ---------------------------------------------------------------- #
-    scene("Agent 到底对客户说了什么",
-          "话术是预设模板渲染的，Agent 没有自由文本入口。注意语气：专业、克制、"
-          "信息完整（金额/到期日/付款链接），并且明确给出「已付请忽略」的出口。")
-    show_outbox_one("INV-2001", "对客户 · 轻度首次提醒")
-    note("Agent 不可能写出「我们同意贵司分期」这类话 —— "
-         f"渲染函数 {BOLD}render(template_id, variables){RESET} 根本没有 body 参数。")
+    scene("What exactly did the agent say to the customer?",
+          "The wording comes from a pre-approved template; the agent has no free-text input. Note the tone: professional, restrained, "
+          "complete (amount / due date / payment link), with a clear 'ignore this if already paid' way out. (Customer messages are in Chinese.)")
+    show_outbox_one("INV-2001", "to customer · first light-tier reminder")
+    note("The agent cannot write something like 'we agree you may pay in instalments': "
+         f"the render function {BOLD}render(template_id, variables){RESET} has no body parameter at all.")
 
     # ---------------------------------------------------------------- #
-    scene("中度：先给人优先权，而不是抢在人前面",
-          "这是整套设计里最能体现「人机协作而非机器接管」的一条：Agent 先通知客户经理，"
-          "明确告诉他有 48 小时优先处理权，以及不响应会发生什么。")
-    show_outbox_one("INV-2010", "对内 · Slack 通知客户经理")
+    scene("Medium: give people priority instead of acting before them",
+          "This is where 'human-AI collaboration, not machine takeover' shows most clearly: the agent notifies the account manager first, "
+          "tells them they have 48 hours of priority, and says what happens if they do not respond.")
+    show_outbox_one("INV-2010", "internal · Slack notice to account manager")
 
     # ---------------------------------------------------------------- #
-    scene("高风险：误判的代价是「财务多看一眼」，不是「客户被误伤」",
-          "高风险分级只触发内部通知，不触发任何对外动作。这是刻意做的非对称风险控制："
-          "宁可误报增加人工审查，不可漏报导致自动化误伤客户关系。")
-    show_outbox_one("INV-2019", "对内 · 高风险告警（26 万 / 逾期 40 天）")
-    note(f"注意加粗那句「{BOLD}系统未向该客户发送任何消息{RESET}」—— "
-         "让财务一眼就能确认客户没被打扰过。")
+    scene("High risk: a misjudgement costs finance a second look, not a harmed customer",
+          "High risk only triggers internal notifications, never a customer-facing action. This asymmetric risk control is deliberate: "
+          "a false alarm adds some human review; a miss could let automation damage a customer relationship.")
+    show_outbox_one("INV-2019", "internal · high-risk alert (260,000 / 40 days overdue)")
+    note(f"Note the bold line '{BOLD}The system has sent nothing to this customer{RESET}': "
+         "finance can confirm at a glance that the customer was not contacted.")
 
     # ---------------------------------------------------------------- #
-    scene("客户经理接管：Agent 立即停手",
-          "接管做成显式命令，而不是「在 Slack 回一句我来处理」。"
-          "聊天记录是上下文，不是授权 —— 把它当授权用，等于给任何能在那个频道说话的人开了个口子。")
-    _run("takeover", "INV-2014", "--by", "李娜", "--note", "客户答应本周五付款，我自己跟进")
+    scene("Account manager takes over: the agent stops at once",
+          "A takeover is an explicit command, not a Slack reply like 'I'll handle it'. "
+          "Chat history is context, not authorisation; treating it as authorisation would let anyone who can post in that channel operate the system.")
+    _run("takeover", "INV-2014", "--by", "李娜", "--note", "customer promised to pay this Friday; I will follow up myself")
 
     # ---------------------------------------------------------------- #
-    scene("48 小时后：客户经理没响应的，Agent 补位",
-          "补位发的是「正式但克制」的对账函，不是加压话术。"
-          "同时把「客户经理未响应」这个事实记进周报 —— 这本身是个管理信号。")
+    scene("48 hours later: where the account manager did not respond, the agent steps in",
+          "It sends a formal but restrained reconciliation email, not a pressure letter. "
+          "It also records 'account manager did not respond' in the weekly report, which is a management signal in itself.")
     _run("scan", "--date", "2026-08-27 10:00")
-    note("被接管的 INV-2014 在列表里是「暂不动作」—— Agent 认接管，不抢人的活。")
+    note("INV-2014, which was taken over, shows as 'hold': the agent respects the takeover and does not step on the person's work.")
 
     # ---------------------------------------------------------------- #
-    scene("关键规则：客户一提「分期」，无条件转人工",
-          "现在模拟一个轻度账款的客户回复。这条规则是纯关键词匹配，不经过 LLM —— "
-          "它不判断诉求是否合理，命中即升级。")
+    scene("Key rule: when a customer mentions instalments, it goes to a person unconditionally",
+          "Now simulate a customer reply on a light-tier invoice. The rule is plain keyword matching with no LLM: "
+          "it does not judge whether the request is reasonable; a match escalates.")
     _run("reply", "INV-2005", "--text",
          "你好，这个月资金有点紧，我们能不能分三期把这笔款付清？",
          "--at", "2026-08-27 15:00")
-    note("下一次扫描时，这条账款会从 🟢 轻度 直接跳到 🔴 高风险，并停止一切自动化。")
+    note("On the next scan this invoice jumps from 🟢 light straight to 🔴 high risk, and all automation stops.")
 
     # ---------------------------------------------------------------- #
-    scene("验证：轻度 → 高风险，且不再对客户发任何东西",
-          "分级引擎按天数金额本来判它轻度，运行时策略层覆盖了这个判断。"
-          "这就是「复杂任务逻辑不能被绕过」的落地方式：判定权在规则层，不在模型。")
+    scene("Check: light -> high risk, and nothing more is sent to the customer",
+          "By days and amount the tiering engine rated it light; the runtime policy layer overrode that. "
+          "This is how 'complex logic that cannot be bypassed' works in practice: the rule layer decides, not the model.")
     _run("scan", "--date", "2026-08-28 09:00")
-    note("再往后推几天：INV-2026 到这时才刚过付款日 —— 它是系统上线后"
-         "新逾期的第一笔，用它才能量出真实的首次触达时效。")
+    note("A few more days on: INV-2026 has only just passed its due date. It is the first invoice to go overdue "
+         "after go-live, and only invoices like it measure the real time to first touch.")
     _run("scan", "--date", "2026-08-31 09:00")
 
     # ---------------------------------------------------------------- #
-    scene("给 CFO 的周报",
-          "CFO 的诉求是「不用追着财务要数据」。注意第三段护栏指标 —— "
-          "把反向指标放进 CFO 每周都看的报告里，它才真正约束决策，"
-          "藏在监控后台就没人当回事。")
+    scene("The CFO's weekly report",
+          "The CFO wants numbers without having to chase finance. Note part three, the guardrail metrics: "
+          "counter-metrics only really constrain decisions when they sit in a report the CFO reads every week; "
+          "hidden in a monitoring back end, nobody takes them seriously.")
     _run("report", "--date", "2026-08-31", "--send")
 
     # ---------------------------------------------------------------- #
-    scene("风险边界自检：不是承诺，是当场验证",
-          "文档里写「我们有 7 层防线」谁都会写。下面每一条都是"
-          "故意做一件不该被允许的事，然后断言它被拦住了。")
+    scene("Risk-boundary self-check: verified on the spot, not promised",
+          "Anyone can write 'we have 7 layers of defence' in a document. Every check below "
+          "deliberately does something that should not be allowed, then asserts that it was stopped.")
     _run("verify")
 
     # ---------------------------------------------------------------- #
-    scene("可视化面板",
-          "财务和 CFO 真正会问的四个问题：现在有多少钱在外面、"
-          "每条为什么这么判、Agent 对客户说了什么、有没有为了效率牺牲客户关系。")
-    print(f"\n  面板地址：{BOLD}http://127.0.0.1:8787/{RESET}")
-    print(f"  {DIM}启动命令：python ar.py dashboard{RESET}")
+    scene("Web dashboard",
+          "The four questions finance and the CFO actually ask: how much money is outstanding, "
+          "why each invoice was tiered as it was, what the agent said to customers, and whether efficiency cost us customer relationships.")
+    print(f"\n  Dashboard: {BOLD}http://127.0.0.1:8787/{RESET}")
+    print(f"  {DIM}Start it with: python ar.py dashboard{RESET}")
     print(f"\n{GREY}{'═' * 88}{RESET}")
-    print(f"{GREEN}{BOLD}演示结束{RESET}　{DIM}全程 dry-run，"
-          f"所有消息都在 data/outbox/，没有发给任何真实客户。{RESET}")
-    print(f"{DIM}生成时间 {datetime.now():%Y-%m-%d %H:%M}{RESET}\n")
+    print(f"{GREEN}{BOLD}Demo finished{RESET}   {DIM}dry-run throughout; "
+          f"every message is in data/outbox/ and nothing was sent to a real customer.{RESET}")
+    print(f"{DIM}Generated {datetime.now():%Y-%m-%d %H:%M}{RESET}\n")

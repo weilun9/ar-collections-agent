@@ -1,17 +1,17 @@
-"""渠道抽象层 —— PM 文档 §3.2。
+"""Channel abstraction (product spec §3.2).
 
-**核心设计：对外渠道与对内渠道在类型系统层面就是分开的。**
+**Core design: customer-facing and internal channels are separate types.**
 
-    CustomerChannel  → WhatsApp / Gmail(对客户)   会打扰到客户
-    InternalChannel  → Slack / Gmail(对团队)      只打扰同事
+    CustomerChannel  -> WhatsApp / Gmail (to customers)   reaches customers
+    InternalChannel  -> Slack / Gmail (to the team)       only reaches colleagues
 
-文档原话：「即使 Agent 误判，最坏情况也是'内部多发了一条通知'，而不是'对客户发错了消息'」。
-把它做成两个基类而不是一个 send() 加个 flag，是因为 flag 会写错，类型不会。
-编排层想对客户发消息，必须显式拿到一个 CustomerChannel 实例，
-而拿这个实例的路径上有 policy 闸门守着（agent_may_contact_customer）。
+From the spec: "even if the agent misjudges, the worst case is an extra internal notification, not a wrong message to a customer."
+It is two base classes rather than one send() with a flag, because a flag can be set wrongly and a type cannot.
+To message a customer, the orchestrator must explicitly obtain a CustomerChannel instance,
+and the path to that instance is guarded by the policy gate (agent_may_contact_customer).
 
-所有渠道默认 dry-run：消息写入 data/outbox/ 而不真的发出。
-要真的发出去，必须同时满足 config.channels.<name>.live=true **且** 环境变量 AR_LIVE=1。
+Every channel is dry-run by default: messages are written to data/outbox/ instead of being sent.
+Real sending needs both config.channels.<name>.live=true **and** the environment variable AR_LIVE=1.
 """
 from __future__ import annotations
 
@@ -35,10 +35,10 @@ class Channel(ABC):
 
     def send(self, msg: Message) -> SendResult:
         if msg.audience != self.audience:
-            # 防呆：把对内模板塞进对外渠道（或反过来）直接拒绝。
+            # Safety net: refuse an internal template on a customer channel (or the reverse).
             return SendResult(
                 ok=False, channel=self.name, to=msg.to, mode="blocked",
-                detail=f"受众不匹配：模板 audience={msg.audience}，渠道 audience={self.audience}",
+                detail=f"audience mismatch: template audience={msg.audience}, channel audience={self.audience}",
             )
         if self.live:
             try:
@@ -65,17 +65,17 @@ class Channel(ABC):
         }
         with open(path, "w", encoding="utf-8") as fh:
             json.dump(payload, fh, ensure_ascii=False, indent=2)
-        return SendResult(True, self.name, msg.to, "dry_run", "已写入 outbox（未真实发送）", path.name)
+        return SendResult(True, self.name, msg.to, "dry_run", "written to outbox (not actually sent)", path.name)
 
     @abstractmethod
     def _send_live(self, msg: Message) -> SendResult: ...
 
 
 class CustomerChannel(Channel):
-    """对外渠道：会真正打扰到客户。任何调用都必须先过 policy 闸门。"""
+    """Customer-facing channel: reaches real customers. Every call must pass the policy gate first."""
     audience = "customer"
 
 
 class InternalChannel(Channel):
-    """对内渠道：只通知同事。误报的代价是同事多看一眼，可接受。"""
+    """Internal channel: only notifies colleagues. The cost of a false alarm is a colleague taking a look, which is acceptable."""
     audience = "internal"

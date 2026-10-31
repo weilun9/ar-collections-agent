@@ -1,16 +1,16 @@
-"""L4 运行时策略层 —— PM 文档 §5 的核心防线。
+"""L4 runtime policy layer: the core line of defence in product spec §5.
 
-这一层的设计要点：
+Design points:
 
-    **它跑在 LLM 之外，且跑在分级引擎之后。**
+    **It runs outside the LLM, and after the tiering engine.**
 
-system prompt 里写"任何还款条件变更必须转人工"是**软约束** —— 模型可能忽略、
-可能被 prompt injection 绕过、可能在长上下文里遗忘。而这一层是 Python 代码：
-它不读 prompt、不调模型，只看事实与阈值，命中即执行。Agent 没有任何办法说服它。
+Writing "any change to payment terms must go to a person" in a system prompt is a **soft constraint**: the model may ignore it,
+prompt injection may bypass it, and it may be forgotten in a long context. This layer is Python code:
+it reads no prompt and calls no model; it only checks facts against thresholds and acts on a match. The agent has no way to talk it round.
 
-执行顺序：分级引擎给出 base_tier → 策略链逐条过 → 得到最终 tier 与是否允许对外发送。
-每条规则只能让结果**更严格**（升级、禁止对外发送），不能放宽。这个单调性是刻意的：
-新增规则永远不会意外打开一个之前关着的口子。
+Order: the tiering engine gives base_tier -> each rule in the chain runs -> final tier and whether customer contact is allowed.
+Each rule can only make the result **stricter** (escalate, forbid customer contact), never looser. This monotonicity is deliberate:
+adding a rule can never accidentally open a door that was closed.
 """
 from __future__ import annotations
 
@@ -24,13 +24,13 @@ from .models import Customer, Invoice, Tier
 
 @dataclass
 class PolicyContext:
-    """策略判定所需的全部输入。"""
+    """Everything a policy decision needs."""
     invoice: Invoice
     customer: Customer
     base_tier: Tier
     today: date
     sends_today: int = 0
-    inbound_intent: str | None = None      # 来自 inbound.classify_reply
+    inbound_intent: str | None = None      # from inbound.classify_reply
     inbound_summary: str = ""
 
 
@@ -39,10 +39,10 @@ class PolicyOutcome:
     tier: Tier
     agent_may_contact_customer: bool = True
     hits: list[str] = field(default_factory=list)
-    halt_all_sending: bool = False         # 全局暂停（日发送量熔断）
+    halt_all_sending: bool = False         # global pause (daily send cap)
 
     def escalate_to(self, tier: Tier, reason: str) -> None:
-        """只升不降：策略层永远不会把一条账款判得更轻。"""
+        """Escalate only, never downgrade: the policy layer never makes an invoice's tier lighter."""
         if tier.rank > self.tier.rank:
             self.tier = tier
         self.hits.append(reason)
@@ -62,105 +62,105 @@ class PolicyRule(ABC):
 
 
 # --------------------------------------------------------------------------- #
-# 规则实现
+# Rules
 # --------------------------------------------------------------------------- #
 
 class TermsChangeForcesHigh(PolicyRule):
-    """客户提出还款条件变更 → 无条件升级高风险，不论当前分级。
+    """The customer asks to change payment terms -> unconditionally escalate to high risk, whatever the current tier.
 
-    PM 文档 §4.2。这条是"复杂任务逻辑不能被绕过"的具体落地：
-    判定依据来自 inbound.py 的纯关键词匹配，不是模型的语义判断。
+    Product spec §4.2. This is "complex logic that cannot be bypassed" in practice:
+    the trigger comes from plain keyword matching in inbound.py, not from a model's reading of the message.
     """
     id = "P-01"
-    description = "还款条件变更诉求（分期/打折/延期）强制升级高风险"
+    description = "Request to change payment terms (instalments / discount / extension) forces high risk"
 
     def apply(self, ctx, out, cfg):
         if not cfg.policy.get("terms_change_forces_high", True):
             return
         if ctx.inbound_intent == "terms_change":
-            out.escalate_to(Tier.HIGH, f"{self.id} 还款条件变更诉求 → 强制高风险（{ctx.inbound_summary}）")
-            out.forbid_customer_contact(f"{self.id} 条件变更须人工决策，Agent 停止一切对外动作")
+            out.escalate_to(Tier.HIGH, f"{self.id} request to change payment terms -> forced high risk ({ctx.inbound_summary})")
+            out.forbid_customer_contact(f"{self.id} changing terms needs a human decision; the agent stops all customer contact")
 
 
 class DisputeForcesHigh(PolicyRule):
-    """账目争议 / 法务信号 → 强制升级高风险。"""
+    """Billing dispute / legal signal -> forced to high risk."""
     id = "P-02"
-    description = "账目争议或法务信号强制升级高风险"
+    description = "Billing dispute or legal signal forces high risk"
 
     def apply(self, ctx, out, cfg):
         if not cfg.policy.get("dispute_forces_high", True):
             return
         if ctx.inbound_intent == "dispute":
-            out.escalate_to(Tier.HIGH, f"{self.id} 账目争议/法务信号 → 强制高风险（{ctx.inbound_summary}）")
-            out.forbid_customer_contact(f"{self.id} 争议未澄清前 Agent 不得继续催收")
+            out.escalate_to(Tier.HIGH, f"{self.id} billing dispute / legal signal -> forced high risk ({ctx.inbound_summary})")
+            out.forbid_customer_contact(f"{self.id} the agent may not keep chasing until the dispute is resolved")
 
 
 class HardAmountCeiling(PolicyRule):
-    """超过金额红线的账款，无论分级，Agent 都不能自动处理。
+    """Invoices above the amount ceiling can never be handled automatically, whatever their tier.
 
-    PM 文档 §5 L4 原话：「任何超过 ¥200,000 的账款 → 无论分级都不能被 Agent 自动处理」。
-    注意它与分级引擎里的高风险金额阈值是**两条独立的规则**，只是当前配置值相同。
-    分开写不是冗余：分级阈值是给人看的风险标签，这条是给机器执行的动作闸门。
-    哪天业务想把"高风险标签线"降到 15 万但"自动化禁止线"仍保持 20 万，改配置即可，
-    不需要动代码 —— 标签与权限本来就该解耦。
+    Product spec §5 L4: "any invoice above ¥200,000 must never be handled automatically by the agent, whatever its tier".
+    Note this is a **separate rule** from the high-risk amount threshold in the tiering engine; the two just share a value today.
+    It is not redundant: the tiering threshold is a risk label for people, this one is an action gate for the machine.
+    If the business later wants the high-risk label at 150,000 but the automation ceiling to stay at 200,000, it is a config change,
+    not a code change: labels and permissions should be decoupled.
     """
     id = "P-03"
-    description = "金额超过红线的账款禁止 Agent 自动对外处理"
+    description = "Invoices above the amount ceiling may not be handled automatically by the agent"
 
     def apply(self, ctx, out, cfg):
         ceiling = cfg.policy["hard_human_only_amount"]
         if ctx.invoice.amount > ceiling:
-            out.escalate_to(Tier.HIGH, f"{self.id} 金额 ¥{ctx.invoice.amount:,.0f} > 红线 ¥{ceiling:,.0f}")
-            out.forbid_customer_contact(f"{self.id} 超红线账款仅限人工处理")
+            out.escalate_to(Tier.HIGH, f"{self.id} amount ¥{ctx.invoice.amount:,.0f} > ceiling ¥{ceiling:,.0f}")
+            out.forbid_customer_contact(f"{self.id} invoices above the ceiling are handled by people only")
 
 
 class VipAlwaysHuman(PolicyRule):
-    """VIP 客户默认强制转人工。
+    """VIP customers always go to a person.
 
-    PM 文档 §6.2 反向指标：「VIP 客户被 Agent 自动催收的次数，目标 0」。
-    指标定成 0，就不能只靠"希望它不发生"，得有一条规则在运行时保证它不可能发生。
-    这就是反向指标与策略层的对应关系 —— 每个 guardrail metric 都该有一条规则托底。
+    Product spec §6.2 guardrail metric: "number of times a VIP customer was chased automatically by the agent: target 0".
+    A target of 0 cannot rest on hoping it never happens; a rule has to make it impossible at runtime.
+    That is how guardrail metrics map to the policy layer: every guardrail metric should have a rule behind it.
     """
     id = "P-04"
-    description = "VIP 客户禁止 Agent 自动催收，一律转人工"
+    description = "VIP customers are never chased automatically; always handled by a person"
 
     def apply(self, ctx, out, cfg):
         if cfg.policy.get("vip_always_human", True) and ctx.customer.is_vip:
-            out.escalate_to(Tier.HIGH, f"{self.id} VIP 客户 {ctx.customer.name} → 强制人工")
-            out.forbid_customer_contact(f"{self.id} VIP 客户不接受自动催收")
+            out.escalate_to(Tier.HIGH, f"{self.id} VIP customer {ctx.customer.name} -> forced to a person")
+            out.forbid_customer_contact(f"{self.id} VIP customers do not receive automated reminders")
 
 
 class DailySendCap(PolicyRule):
-    """单日发送量超限 → 暂停并通知财务。
+    """Daily send volume over the cap -> pause and notify finance.
 
-    这是防"逻辑写错导致群发轰炸"的兜底。哪怕分级引擎彻底判错，
-    单日也最多打扰 N 个客户，损失有上界。
+    A backstop against a logic bug that blasts every customer. Even if the tiering engine is completely wrong,
+    at most N customers can be contacted in a day, so the damage is bounded.
     """
     id = "P-05"
-    description = "单日对外发送量超过上限时全局暂停"
+    description = "Pause all sending when the daily customer send volume reaches the cap"
 
     def apply(self, ctx, out, cfg):
         cap = cfg.policy["daily_send_cap"]
         if ctx.sends_today >= cap:
             out.halt_all_sending = True
-            out.forbid_customer_contact(f"{self.id} 单日发送量已达上限 {cap} 条，暂停并通知财务")
+            out.forbid_customer_contact(f"{self.id} daily send cap of {cap} reached; pausing and notifying finance")
 
 
 class PaidClaimPauses(PolicyRule):
-    """客户声称已付款 → 暂停催收，转财务核账。
+    """The customer says it has paid -> pause collection and let finance check the payment.
 
-    文档没有明确写这条，但它是必要的：在财务确认到账前继续催一个已经付了款的客户，
-    是最伤客户关系的一类错误，而且完全可以避免。做法与"争议"一致 —— 停止自动动作、转人工核实。
+    The spec does not state this rule explicitly, but it is necessary: chasing a customer who has already paid, before finance confirms receipt,
+    is the most damaging kind of mistake and is entirely avoidable. Same approach as a dispute: stop automatic actions and hand over to a person.
     """
     id = "P-06"
-    description = "客户声称已付款时暂停自动催收，转财务核账"
+    description = "Pause automated collection when the customer says it has paid, until finance checks"
 
     def apply(self, ctx, out, cfg):
         if ctx.inbound_intent == "paid_claim":
-            out.forbid_customer_contact(f"{self.id} 客户称已付款，待财务核账前停止催收")
+            out.forbid_customer_contact(f"{self.id} customer says it has paid; collection stops until finance checks")
 
 
-#: 策略链。顺序无关（每条规则只做单调收紧），但按编号排列便于日志阅读与审计。
+#: The rule chain. Order does not matter (every rule only tightens), but it is kept in ID order for readable logs and audits.
 DEFAULT_RULES: list[PolicyRule] = [
     TermsChangeForcesHigh(),
     DisputeForcesHigh(),
@@ -172,7 +172,7 @@ DEFAULT_RULES: list[PolicyRule] = [
 
 
 def evaluate(ctx: PolicyContext, cfg: Config, rules: list[PolicyRule] | None = None) -> PolicyOutcome:
-    """跑完整条策略链，返回最终裁决。"""
+    """Run the whole rule chain and return the final verdict."""
     out = PolicyOutcome(tier=ctx.base_tier)
     for rule in (rules if rules is not None else DEFAULT_RULES):
         rule.apply(ctx, out, cfg)
@@ -180,5 +180,5 @@ def evaluate(ctx: PolicyContext, cfg: Config, rules: list[PolicyRule] | None = N
 
 
 def rule_catalog() -> list[dict[str, str]]:
-    """给 Dashboard / 审计报告用的规则清单。"""
+    """Rule list for the dashboard and audit reports."""
     return [{"id": r.id, "description": r.description} for r in DEFAULT_RULES]

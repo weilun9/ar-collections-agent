@@ -10,7 +10,7 @@ __all__ = [
 
 
 def build_registry(cfg, outbox_dir):
-    """按配置装配渠道。默认全部 dry-run。"""
+    """Build the channels from config. Everything is dry-run by default."""
     return {
         "whatsapp": WhatsAppChannel(cfg.channel_is_live("whatsapp"), outbox_dir),
         "gmail": GmailCustomerChannel(cfg.channel_is_live("gmail"), outbox_dir),

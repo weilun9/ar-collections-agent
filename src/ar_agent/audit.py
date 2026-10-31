@@ -1,9 +1,9 @@
-"""L5 可观测性 —— PM 文档 §5。
+"""L5 observability (product spec §5).
 
-「财务/CFO 可随时查询：这条催收是 Agent 发的还是人工发的」。
+"Finance and the CFO can ask at any time: was this reminder sent by the agent or by a person?"
 
-所以日志表的第一等公民是 actor 字段，而不是时间戳。
-每条记录都能回答四个问题：谁做的、对谁做的、为什么做、依据哪条规则。
+So the first-class field of the log is `actor`, not the timestamp.
+Every record answers four questions: who acted, on whom, why, and under which rule.
 """
 from __future__ import annotations
 
@@ -12,22 +12,22 @@ from datetime import datetime
 from pathlib import Path
 
 LOG_COLUMNS = [
-    "timestamp",        # 动作发生时间
-    "run_id",           # 哪一次扫描任务
-    "actor",            # agent / human / system  ← 核心字段
+    "timestamp",        # when the action happened
+    "run_id",           # which scan run
+    "actor",            # agent / human / system  <- the key field
     "invoice_id",
     "customer_id",
     "customer_name",
-    "tier",             # 最终分级
-    "base_tier",        # 策略层介入前的分级（对比可看出策略层做了什么）
+    "tier",             # final tier
+    "base_tier",        # tier before the policy layer (the difference shows what the policy layer did)
     "action",
     "channel",
     "recipient",
     "template_id",
     "mode",             # live / dry_run
     "ok",
-    "reasons",          # 分级依据
-    "policy_hits",      # 命中的 L4 规则
+    "reasons",          # why this tier
+    "policy_hits",      # L4 rules that fired
     "content_preview",
 ]
 

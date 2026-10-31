@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""入口脚本 —— 让 `python ar.py <命令>` 在任何目录下都能跑。"""
+"""Entry point, so that `python ar.py <command>` works from any directory."""
 import pathlib
 import sys
 

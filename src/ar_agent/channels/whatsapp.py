@@ -1,14 +1,14 @@
-"""WhatsApp Business（Meta Cloud API）—— 对客户发送轻度提醒。
+"""WhatsApp Business (Meta Cloud API): light-tier reminders to customers.
 
-真实接入需要 .env：
+Live sending needs these in .env:
     WHATSAPP_PHONE_NUMBER_ID=...
     WHATSAPP_TOKEN=...
 
-平台约束：Meta 只允许在客户 24 小时会话窗口内发送自由文本；窗口外必须使用预审批模板
-（Message Template）。催收提醒是主动发起的，基本都在窗口外，因此 live 发送一律走
-type=template，正文由 Meta 端审批过的模板决定，本地只传变量。
-这与 L2「只发预设模板」的约束一致：本地模板没有对应的 Meta 模板时直接拒绝发送（fail closed），
-不会退回自由文本。
+Platform rule: Meta only allows free text inside the customer's 24-hour conversation window; outside it, only pre-approved
+message templates can be sent. Collection reminders are business-initiated and almost always outside the window, so every
+live send uses type=template: the wording is fixed by the template approved on Meta's side, and only variables are sent.
+This matches the L2 rule "pre-approved templates only": if a local template has no mapped Meta template, sending is refused (fail closed)
+rather than falling back to free text.
 """
 from __future__ import annotations
 
@@ -24,18 +24,18 @@ GRAPH_API = "https://graph.facebook.com/v21.0"
 
 
 class UnmappedTemplate(Exception):
-    """本地模板没有对应的 Meta 审批模板，拒绝发送。"""
+    """The local template has no approved Meta template mapped; refuse to send."""
 
 
 def build_payload(msg: Message) -> dict:
-    """把本地模板消息转换成 Meta 模板消息请求体。纯函数，便于测试。"""
+    """Convert a local template message into a Meta template-message request body. Pure function, easy to test."""
     mapping = WHATSAPP_META_TEMPLATES.get(msg.template_id)
     if mapping is None:
-        raise UnmappedTemplate(f"模板 {msg.template_id} 没有对应的 WhatsApp 审批模板")
+        raise UnmappedTemplate(f"template {msg.template_id} has no approved WhatsApp template mapped")
     name, lang, param_names = mapping
     missing = [p for p in param_names if p not in msg.variables]
     if missing:
-        raise UnmappedTemplate(f"模板 {msg.template_id} 缺少变量: {', '.join(missing)}")
+        raise UnmappedTemplate(f"template {msg.template_id} is missing variables: {', '.join(missing)}")
     return {
         "messaging_product": "whatsapp",
         "to": msg.to,
@@ -55,7 +55,7 @@ class WhatsAppChannel(CustomerChannel):
     name = "whatsapp"
 
     def _send_live(self, msg: Message) -> SendResult:
-        payload = build_payload(msg)          # 无映射时抛异常，由 Channel.send 记为发送失败
+        payload = build_payload(msg)          # raises if unmapped; Channel.send records it as a failed send
         phone_id = os.environ["WHATSAPP_PHONE_NUMBER_ID"]
         token = os.environ["WHATSAPP_TOKEN"]
         req = urllib.request.Request(
@@ -70,4 +70,4 @@ class WhatsAppChannel(CustomerChannel):
         with urllib.request.urlopen(req, timeout=20) as resp:
             body = json.loads(resp.read().decode("utf-8"))
         ref = (body.get("messages") or [{}])[0].get("id", "")
-        return SendResult(True, self.name, msg.to, "live", "已发送", ref)
+        return SendResult(True, self.name, msg.to, "live", "sent", ref)

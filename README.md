@@ -14,10 +14,10 @@ place only, where a mistake costs readability rather than money.
   safety layer live (23/23 checks)
 - Fully **dry-run by default**: messages are written to `data/outbox/`, never sent to anyone
 - Product spec with problem statement, user stories, non-goals and guardrail metrics:
-  [`docs/PRD.zh-CN.md`](docs/PRD.zh-CN.md)
+  [`docs/PRD.md`](docs/PRD.md) (Chinese original: [`docs/PRD.zh-CN.md`](docs/PRD.zh-CN.md))
 
-> The demo data, message templates and reply keywords are in Chinese because the scenario is a
-> Chinese-speaking B2B market. A Chinese version of this README is in [`README.zh-CN.md`](README.zh-CN.md).
+> Code, CLI output, dashboard and internal alerts are in English. The demo data, customer-facing message templates and
+> reply keywords are in Chinese because the simulated customers are a Chinese-speaking B2B market. A Chinese version of this README is in [`README.zh-CN.md`](README.zh-CN.md).
 
 ## Run it in 60 seconds
 
@@ -157,7 +157,7 @@ src/ar_agent/
   verify.py               live safety self-check
   demo.py                 guided demo
 dashboard/index.html      local dashboard
-docs/PRD.zh-CN.md         product spec
+docs/PRD.md               product spec (PRD.zh-CN.md: Chinese original)
 tests/                    58 unit tests
 ```
 

@@ -1,4 +1,4 @@
-"""配置加载。所有阈值来自 config.json，代码里不硬编码业务数字。"""
+"""Configuration loading. Every threshold comes from config.json; no business numbers are hard-coded."""
 from __future__ import annotations
 
 import json
@@ -27,7 +27,7 @@ class Config:
         return self.raw[key]
 
     def get(self, dotted: str, default: Any = None) -> Any:
-        """按 'policy.daily_send_cap' 这种路径取值。"""
+        """Look up a dotted path such as 'policy.daily_send_cap'."""
         node: Any = self.raw
         for part in dotted.split("."):
             if not isinstance(node, dict) or part not in node:
@@ -35,7 +35,7 @@ class Config:
             node = node[part]
         return node
 
-    # ---- 便捷访问 ----
+    # ---- Shortcuts ----
     @property
     def company(self) -> dict[str, Any]:
         return self.raw["company"]
@@ -57,10 +57,10 @@ class Config:
         return self.raw["breaker"]
 
     def channel_is_live(self, name: str) -> bool:
-        """双重闸门：config 里 live=true **且** 环境变量 AR_LIVE=1，才会真的对外发送。
+        """Two gates: live=true in config **and** AR_LIVE=1 in the environment are both required to send for real.
 
-        任何一个没开，一律走 dry-run 写 outbox。这样即使误改了配置文件，
-        没有显式设置 AR_LIVE 也不会对客户发出真实消息。
+        If either is missing, everything goes to the dry-run outbox. So even a mistaken config edit
+        cannot send a real message to a customer unless AR_LIVE is set explicitly.
         """
         configured = bool(self.get(f"channels.{name}.live", False))
         env_gate = os.environ.get("AR_LIVE", "0") == "1"

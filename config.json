@@ -1,5 +1,5 @@
 {
-  "_comment": "AR Collections Agent 运行配置。所有阈值外置，PM/财务可直接改本文件，无需改代码。",
+  "_comment": "AR Collections Agent runtime config. Every threshold lives here, so product or finance staff can change them without touching code.",
 
   "company": {
     "name": "示例贸易有限公司",
@@ -10,7 +10,7 @@
   },
 
   "tiering": {
-    "_comment": "对应 PM 文档 §4 分级决策矩阵。命中任一 high 条件即高风险；否则命中任一 mid 条件即中度；否则逾期即轻度。",
+    "_comment": "Product spec §4 tiering decision matrix. Any high condition -> high risk; otherwise any mid condition -> medium; otherwise any overdue invoice -> light.",
     "low": {
       "overdue_days_min": 1,
       "overdue_days_max": 14,
@@ -31,7 +31,7 @@
   },
 
   "cadence": {
-    "_comment": "轻度分级的自动跟进节奏；中度分级的客户经理缓冲期。",
+    "_comment": "Follow-up cadence for the light tier; account-manager buffer for the medium tier.",
     "low_first_reminder_after_days": 1,
     "low_second_reminder_gap_days": 7,
     "low_max_reminders": 2,
@@ -39,7 +39,7 @@
   },
 
   "policy": {
-    "_comment": "L4 运行时策略层。这些是硬规则，独立于 LLM 与 system prompt，命中即生效、不可被绕过。",
+    "_comment": "L4 runtime policy layer. Hard rules, independent of the LLM and any system prompt; they apply on a match and cannot be bypassed.",
     "hard_human_only_amount": 200000,
     "vip_always_human": true,
     "daily_send_cap": 50,
@@ -48,20 +48,20 @@
   },
 
   "breaker": {
-    "_comment": "L6 熔断机制。",
+    "_comment": "L6 circuit breakers.",
     "max_invoices_per_scan": 200,
     "consecutive_send_failures_to_pause": 5
   },
 
   "channels": {
-    "_comment": "live=false 时全部走 dry-run，消息只写入 data/outbox/，不会真的发出去。改为 true 还需同时提供 .env 凭据 + 设置 AR_LIVE=1，双重闸门。",
+    "_comment": "With live=false everything is dry-run: messages are only written to data/outbox/ and never sent. Setting true also needs .env credentials and AR_LIVE=1 (two gates).",
     "whatsapp": { "live": false },
     "gmail":    { "live": false },
     "slack":    { "live": false }
   },
 
   "llm": {
-    "_comment": "只用于高风险告警里的沟通历史摘要，不参与任何决策。provider: none | ollama | anthropic；环境变量 AR_LLM_PROVIDER / AR_LLM_MODEL 可覆盖。失败或校验不通过时自动回退为原始记录。",
+    "_comment": "Only used for the contact-history summary in high-risk alerts; takes no part in any decision. provider: none | ollama | anthropic; the AR_LLM_PROVIDER / AR_LLM_MODEL environment variables override it. Falls back to the raw records on failure or if the check fails.",
     "provider": "none",
     "model": "",
     "ollama_base_url": "http://localhost:11434",

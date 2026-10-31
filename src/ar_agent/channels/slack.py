@@ -1,16 +1,16 @@
-"""Slack —— 纯对内告警渠道。
+"""Slack: an internal alert channel only.
 
-PM 文档 §3.2 明确：Slack「只写（通知），不做自动化决策」。
-所以这里**只有发送能力，没有读取能力** —— Agent 不会去读 Slack 里同事说了什么，
-更不会把同事的一句话当成指令去执行。人要接管，走 CLI 的显式命令（ar takeover），
-而不是在 Slack 里回一句"我来处理"就让 Agent 自动改状态。
+Product spec §3.2: Slack is "write-only (notifications), no automated decisions".
+So this class **can only send, never read**: the agent never reads what colleagues say in Slack,
+let alone treats a chat message as an instruction. To take over a case, a person uses the explicit CLI command (ar takeover),
+not a Slack reply such as "I'll handle it" that silently changes the agent's state.
 
-这是有意的：聊天记录是**上下文**，不是**授权**。把它当授权用，
-等于给任何能在那个频道说话的人开了一个操作系统的口子。
+This is deliberate: chat history is **context**, not **authorisation**. Treating it as authorisation
+would give anyone who can post in that channel a way to operate the system.
 
-真实接入用 Incoming Webhook（最简单，无需 bot scope）：
+Live sending uses an Incoming Webhook (simplest, no bot scope needed):
     SLACK_WEBHOOK_URL=https://hooks.slack.com/services/...
-或用 Bot Token 发到指定频道/私聊：
+or a Bot Token to post to a given channel or DM:
     SLACK_BOT_TOKEN=xoxb-...
 """
 from __future__ import annotations
@@ -43,7 +43,7 @@ class SlackChannel(InternalChannel):
                 body = json.loads(resp.read().decode("utf-8"))
             if not body.get("ok"):
                 return SendResult(False, self.name, msg.to, "live", str(body.get("error")))
-            return SendResult(True, self.name, msg.to, "live", "已发送", body.get("ts", ""))
+            return SendResult(True, self.name, msg.to, "live", "sent", body.get("ts", ""))
 
         webhook = os.environ["SLACK_WEBHOOK_URL"]
         req = urllib.request.Request(
@@ -54,4 +54,4 @@ class SlackChannel(InternalChannel):
         )
         with urllib.request.urlopen(req, timeout=20) as resp:
             resp.read()
-        return SendResult(True, self.name, msg.to, "live", "已发送(webhook)")
+        return SendResult(True, self.name, msg.to, "live", "sent (webhook)")

@@ -1,18 +1,18 @@
-"""L2 工具设计 —— PM 文档 §5：「只能发送预设模板，不能自由生成还款承诺类文本」。
+"""L2 tool design (product spec §5): "only pre-approved templates can be sent; no freely generated text promising payment terms".
 
-落地方式有两层，缺一不可：
+Two layers, both required:
 
-  **第一层：接口层面根本不给自由文本的入口。**
-  render() 的签名是 (template_id, 变量字典)，没有 body/text/content 参数。
-  Agent 能选模板、能填变量（金额、日期、单号），但无法凭空造一句
-  "我们同意您分三期支付"。这不是"我们要求它别这么做"，是**它做不到**。
+  **Layer 1: the interface offers no way in for free text.**
+  render() takes (template_id, dict of variables) and has no body/text/content parameter.
+  The agent can choose a template and fill variables (amount, date, invoice number), but cannot produce a sentence such as
+  "we agree you may pay in three instalments". It is not that we ask it not to; **it cannot**.
 
-  **第二层：渲染完再扫一遍禁用词。**
-  万一模板本身被人误改、或变量注入带进了危险措辞，发送前还有一道 guard。
-  纵深防御 —— 假设第一层会被绕过，再问一次"就算绕过了，最坏会发出什么"。
+  **Layer 2: scan the rendered text for forbidden wording.**
+  In case a template is edited by mistake or a variable injects risky wording, there is one more guard before sending.
+  Defence in depth: assume layer 1 will be bypassed and ask again what the worst possible message would be.
 
-话术设计原则：专业、克制、信息完整（金额/到期日/付款链接），不用施压性措辞
-（对应 §一 用户故事"不会因为一次自动化提醒而对合作关系产生负面感受"、§5 L7 合规）。
+Wording principles: professional, restrained, complete (amount / due date / payment link), and no pressure wording
+(spec §1 user story "a single automated reminder should not sour the relationship", and §5 L7 compliance).
 """
 from __future__ import annotations
 
@@ -21,7 +21,7 @@ from dataclasses import dataclass
 
 
 class TemplateViolation(Exception):
-    """渲染结果命中禁用措辞时抛出，发送流程中止。"""
+    """Raised when rendered text contains forbidden wording; sending stops."""
 
 
 @dataclass(frozen=True)
@@ -34,22 +34,22 @@ class Template:
     note: str = ""
 
 
-#: 禁用措辞：任何暗示"改变还款条件"或"施压"的表达。
-#: 前者对应 §一 Non-Goals（改变还款条件必须人工决策）；
-#: 后者对应 §5 L7（催收内容需符合当地催收行为合规要求，禁止施压性话术）。
+#: Forbidden wording: anything suggesting a change to payment terms, or pressure.
+#: The first kind maps to the spec's non-goals (changing payment terms needs a human decision);
+#: the second maps to §5 L7 (collection messages must follow local debt-collection rules; no pressure wording).
 FORBIDDEN_PATTERNS: list[tuple[str, str]] = [
-    (r"分\s*期|installment", "不得承诺分期"),
-    (r"打\s*折|折扣|减免|优惠|discount|waive", "不得承诺打折减免"),
-    (r"延\s*期|延\s*后|宽\s*限|展\s*期", "不得承诺延期"),
-    (r"免除|豁免|一笔勾销", "不得承诺免除债务"),
-    (r"起诉|上门|曝光|黑名单|失信|后果自负|严重后果", "不得使用施压/威胁性话术"),
-    (r"立即|马上|务必|限你", "不得使用胁迫性时限措辞"),
+    (r"分\s*期|installment", "must not promise instalments"),
+    (r"打\s*折|折扣|减免|优惠|discount|waive", "must not promise a discount or waiver"),
+    (r"延\s*期|延\s*后|宽\s*限|展\s*期", "must not promise an extension"),
+    (r"免除|豁免|一笔勾销", "must not promise to write off the debt"),
+    (r"起诉|上门|曝光|黑名单|失信|后果自负|严重后果", "must not use pressure or threats"),
+    (r"立即|马上|务必|限你", "must not use coercive deadlines"),
 ]
 
 _CODE_FENCE = "```"
 
 TEMPLATES: dict[str, Template] = {
-    # ---------------- 对客户（轻度：WhatsApp 友好提醒）----------------
+    # ---------------- To customers (light tier: friendly WhatsApp reminder; customer-facing text stays in Chinese) ----------------
     "WA_LOW_1": Template(
         id="WA_LOW_1",
         channel="whatsapp",
@@ -63,7 +63,7 @@ TEMPLATES: dict[str, Template] = {
             "付款链接：{payment_url}\n\n"
             "如对账目有任何疑问，回复本条消息即可，会有同事跟进。感谢您的配合。"
         ),
-        note="第 1 次友好提醒，语气轻，明确给出「已付请忽略」的出口",
+        note="First friendly reminder: light tone, with a clear 'ignore this if already paid' way out",
     ),
     "WA_LOW_2": Template(
         id="WA_LOW_2",
@@ -77,10 +77,10 @@ TEMPLATES: dict[str, Template] = {
             "如付款安排上需要沟通，或账目需要核对，回复本条消息，"
             "我们会安排对接同事直接与您联系。"
         ),
-        note="第 2 次提醒，仍不加压；「需要沟通」的措辞是有意的——引导客户说出诉求，触发关键词升级转人工",
+        note="Second reminder, still no pressure. The 'if you need to discuss' wording is deliberate: it invites the customer to state a request, which triggers keyword escalation to a person",
     ),
 
-    # ---------------- 对客户（中度：Gmail 正式催收函）----------------
+    # ---------------- To customers (medium tier: formal Gmail dunning letter) ----------------
     "MAIL_MID_DUNNING": Template(
         id="MAIL_MID_DUNNING",
         channel="gmail",
@@ -102,105 +102,105 @@ TEMPLATES: dict[str, Template] = {
             "{company} 财务部\n"
             "（本邮件由应收账款系统按既定流程发出，仅作对账提醒之用）"
         ),
-        note="正式但克制。对应 §八 Q2：客户经理未响应时发这封，不是加压话术",
+        note="Formal but restrained. Spec Q2: sent when the account manager has not responded; not a pressure letter",
     ),
 
-    # ---------------- 对内（Slack：客户经理缓冲期通知）----------------
+    # ---------------- Internal (Slack: account-manager buffer notice) ----------------
     "SLACK_AM_BUFFER": Template(
         id="SLACK_AM_BUFFER",
         channel="slack",
         audience="internal",
         subject="",
         body=(
-            ":large_yellow_circle: *中风险账款 · 需要你决定是否先介入*\n\n"
-            "• 客户：*{customer_name}*（客户经理：{account_manager}）\n"
-            "• 发票：{invoice_id}　金额：¥{amount}\n"
-            "• 付款日：{due_date}　已逾期：*{days_overdue} 天*\n"
-            "• 分级依据：{reasons}\n\n"
-            "*你有 {buffer_hours} 小时的优先处理权*（截止 {buffer_until}）。\n"
-            "在此之前你可以自己联系客户；如需接管，执行：\n"
+            ":large_yellow_circle: *Medium-risk invoice · decide whether to step in first*\n\n"
+            "• Customer: *{customer_name}* (account manager: {account_manager})\n"
+            "• Invoice: {invoice_id}   Amount: ¥{amount}\n"
+            "• Due date: {due_date}   Overdue: *{days_overdue} days*\n"
+            "• Tier reasons: {reasons}\n\n"
+            "*You have {buffer_hours} hours of priority* (until {buffer_until}).\n"
+            "Until then you can contact the customer yourself; to take over, run:\n"
             + _CODE_FENCE + "\nar takeover {invoice_id} --by {account_manager}\n" + _CODE_FENCE + "\n"
-            "若到期仍未响应，系统将按标准模板发出正式对账邮件，"
-            "并在周报中记录本条为「客户经理未响应」。"
+            "If there is still no response by then, the system will send the standard formal reconciliation email "
+            "and record this invoice in the weekly report as 'account manager did not respond'."
         ),
-        note="缓冲期通知。明确写出「到期会怎样」，让客户经理知道不响应的后果，而不是被系统偷偷接管",
+        note="Buffer notice. It states what happens when the time runs out, so the account manager knows the consequence instead of being silently overridden",
     ),
 
-    # ---------------- 对内（Slack：高风险告警）----------------
+    # ---------------- Internal (Slack: high-risk alert) ----------------
     "SLACK_HIGH_ALERT": Template(
         id="SLACK_HIGH_ALERT",
         channel="slack",
         audience="internal",
         subject="",
         body=(
-            ":red_circle: *高风险账款 · 需人工决策*\n\n"
-            "• 客户：*{customer_name}*（客户经理：{account_manager}）\n"
-            "• 发票：{invoice_id}　金额：*¥{amount}*\n"
-            "• 付款日：{due_date}　已逾期：*{days_overdue} 天*\n"
-            "• 升级原因：{reasons}\n"
-            "• 命中策略：{policy_hits}\n\n"
-            "*系统未向该客户发送任何消息，也不会自动发送。*\n"
-            "历史沟通摘要：{history}\n\n"
-            "请人工决定下一步：继续催收 / 启动法务 / 协商还款计划。"
+            ":red_circle: *High-risk invoice · human decision needed*\n\n"
+            "• Customer: *{customer_name}* (account manager: {account_manager})\n"
+            "• Invoice: {invoice_id}   Amount: *¥{amount}*\n"
+            "• Due date: {due_date}   Overdue: *{days_overdue} days*\n"
+            "• Escalation reasons: {reasons}\n"
+            "• Policy rules hit: {policy_hits}\n\n"
+            "*The system has sent nothing to this customer and will not send anything automatically.*\n"
+            "Contact history summary: {history}\n\n"
+            "Please decide the next step: keep collecting / start legal action / negotiate a payment plan."
         ),
-        note="高风险只通知不外发。「系统未发送任何消息」这句是刻意加粗的——让财务一眼确认客户没被打扰",
+        note="High risk is notify-only. 'The system has sent nothing' is bold on purpose so finance can confirm at a glance that the customer was not contacted",
     ),
 
-    # ---------------- 对内（Gmail：财务负责人高风险书面通知）----------------
+    # ---------------- Internal (Gmail: written high-risk notice to the finance lead) ----------------
     "MAIL_FINANCE_ALERT": Template(
         id="MAIL_FINANCE_ALERT",
         channel="gmail",
         audience="internal",
-        subject="[高风险应收] {customer_name} · {invoice_id} · ¥{amount}",
+        subject="[High-risk receivable] {customer_name} · {invoice_id} · ¥{amount}",
         body=(
-            "以下账款已被系统标记为高风险，需人工决策：\n\n"
-            "    客户：{customer_name}\n"
-            "    客户经理：{account_manager}\n"
-            "    发票编号：{invoice_id}\n"
-            "    金额：¥{amount}\n"
-            "    约定付款日：{due_date}\n"
-            "    逾期天数：{days_overdue} 天\n\n"
-            "升级原因：\n{reasons}\n\n"
-            "命中的运行时策略：\n{policy_hits}\n\n"
-            "历史沟通摘要：\n{history}\n\n"
-            "系统未向该客户发送任何自动消息，后续动作需人工发起。\n"
+            "The following invoice has been marked high risk and needs a human decision:\n\n"
+            "    Customer: {customer_name}\n"
+            "    Account manager: {account_manager}\n"
+            "    Invoice number: {invoice_id}\n"
+            "    Amount: ¥{amount}\n"
+            "    Due date: {due_date}\n"
+            "    Days overdue: {days_overdue}\n\n"
+            "Escalation reasons:\n{reasons}\n\n"
+            "Runtime policy rules hit:\n{policy_hits}\n\n"
+            "Contact history summary:\n{history}\n\n"
+            "The system has sent no automated message to this customer; any next step must be taken by a person.\n"
         ),
-        note="给财务负责人的书面留痕，与 Slack 告警并行——Slack 会被刷走，邮件不会",
+        note="A written record for the finance lead, alongside the Slack alert: Slack scrolls away, email does not",
     ),
 
-    # ---------------- 对内（Slack：熔断/策略暂停告警）----------------
+    # ---------------- Internal (Slack: circuit-breaker / policy pause alert) ----------------
     "SLACK_BREAKER": Template(
         id="SLACK_BREAKER",
         channel="slack",
         audience="internal",
         subject="",
         body=(
-            ":rotating_light: *应收催收 Agent 已暂停*\n\n"
-            "• 触发原因：{reason}\n"
-            "• 时间：{timestamp}\n"
-            "• 受影响渠道：{channel}\n\n"
-            "系统已停止对外发送。排查并确认渠道恢复后执行：\n"
+            ":rotating_light: *AR collections agent paused*\n\n"
+            "• Reason: {reason}\n"
+            "• Time: {timestamp}\n"
+            "• Channel affected: {channel}\n\n"
+            "Customer sending has stopped. After investigating and confirming the channel is back, run:\n"
             + _CODE_FENCE + "\nar reset-breaker --channel {channel}\n" + _CODE_FENCE + "\n"
-            "（刻意不做自动恢复：熔断意味着有事情不对劲，需要有人看一眼。）"
+            "(No automatic recovery on purpose: a tripped breaker means something is wrong and someone should look.)"
         ),
-        note="熔断告警",
+        note="Circuit-breaker alert",
     ),
 }
 
 
 def _guard(text: str, template_id: str) -> None:
-    """发送前的内容闸门（纵深防御第二层）。"""
+    """Content gate before sending (second layer of defence in depth)."""
     for pattern, why in FORBIDDEN_PATTERNS:
         m = re.search(pattern, text)
         if m:
             raise TemplateViolation(
-                f"模板 {template_id} 渲染结果命中禁用措辞「{m.group(0)}」：{why}"
+                f"template {template_id} rendered forbidden wording '{m.group(0)}': {why}"
             )
 
 
-#: WhatsApp 模板映射：本地模板 id → (Meta 审批模板名, 语言, 按 {{1}}{{2}}... 顺序的变量名)。
-#: 主动提醒几乎都在 24 小时会话窗口之外，Meta 只接受预审批模板，所以对客户的 WhatsApp
-#: 消息一律按模板发送。Meta 端的模板正文需与上面 TEMPLATES 中的 body 保持一致。
+#: WhatsApp template mapping: local template id -> (approved Meta template name, language, variable names in {{1}}{{2}}... order).
+#: Business-initiated reminders are almost always outside the 24-hour conversation window, where Meta only accepts pre-approved templates,
+#: so every WhatsApp message to a customer is sent as a template. The template text on Meta's side must match the body in TEMPLATES above.
 WHATSAPP_META_TEMPLATES: dict[str, tuple[str, str, tuple[str, ...]]] = {
     "WA_LOW_1": ("ar_reminder_1", "zh_CN",
                  ("contact_name", "company", "invoice_id", "amount", "due_date", "payment_url")),
@@ -210,15 +210,15 @@ WHATSAPP_META_TEMPLATES: dict[str, tuple[str, str, tuple[str, ...]]] = {
 
 
 def render(template_id: str, variables: dict) -> tuple[str, str]:
-    """渲染模板，返回 (subject, body)。
+    """Render a template and return (subject, body).
 
-    注意签名：**没有任何自由文本参数**。Agent 只能选 template_id 并提供结构化变量。
-    这是 L2 的关键 —— 能力边界写在接口里，而不是写在 prompt 里。
+    Note the signature: **there is no free-text parameter**. The agent can only choose a template_id and supply structured variables.
+    That is the point of L2: the capability boundary is in the interface, not in a prompt.
     """
     tpl = TEMPLATES.get(template_id)
     if tpl is None:
         raise KeyError(
-            f"未知模板: {template_id}（可用模板由财务/合规审核后加入，Agent 不能自行创建）"
+            f"unknown template: {template_id} (templates are added after finance/compliance review; the agent cannot create them)"
         )
 
     safe = {k: ("" if v is None else str(v)) for k, v in variables.items()}
@@ -226,11 +226,11 @@ def render(template_id: str, variables: dict) -> tuple[str, str]:
         subject = tpl.subject.format(**safe)
         body = tpl.body.format(**safe)
     except KeyError as exc:
-        raise KeyError(f"模板 {template_id} 缺少变量: {exc}") from exc
+        raise KeyError(f"template {template_id} is missing a variable: {exc}") from exc
 
     if tpl.audience == "customer":
-        # 只对"发给客户"的内容做禁用词校验：内部告警里出现"分期""起诉"是正常的，
-        # 财务本来就需要看到这些词才能决策。对内对外用不同尺度，是有意为之。
+        # Only customer-facing text is checked for forbidden wording: words like 'instalments' or 'lawsuit' are normal in internal alerts,
+        # because finance needs to see them to decide. Different standards for internal and external text are deliberate.
         _guard(body, template_id)
         _guard(subject, template_id)
 

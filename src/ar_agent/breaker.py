@@ -1,11 +1,11 @@
-"""L6 熔断机制 —— PM 文档 §5。
+"""L6 circuit breakers (product spec §5).
 
-两条熔断：
-  1. 单次扫描最多处理 N 条账款，超过则分批（防一次任务失控地跑完全表）；
-  2. 连续 N 次发送失败自动暂停并告警（防渠道挂了还在空转、或凭据失效被风控）。
+Two breakers:
+  1. A single scan handles at most N invoices and defers the rest (stops one run from sweeping the whole table);
+  2. N consecutive send failures pause the channel and raise an alert (stops a dead channel or revoked credentials from spinning).
 
-熔断状态持久化在 data/breaker_state.json —— 必须跨进程存活，
-否则"连续失败 5 次"这个计数在每次扫描重启时归零，等于没有熔断。
+Breaker state is persisted in data/breaker_state.json and must survive restarts;
+otherwise the "5 failures in a row" counter resets on every scan and the breaker never trips.
 """
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ from .config import Config
 @dataclass
 class BreakerState:
     consecutive_failures: dict[str, int] = field(default_factory=dict)
-    tripped: dict[str, str] = field(default_factory=dict)     # channel -> 触发时间
+    tripped: dict[str, str] = field(default_factory=dict)     # channel -> time it tripped
     sends_by_date: dict[str, int] = field(default_factory=dict)
 
 
@@ -41,18 +41,18 @@ class CircuitBreaker:
         with open(self.path, "w", encoding="utf-8") as fh:
             json.dump(asdict(self.state), fh, ensure_ascii=False, indent=2)
 
-    # ---- 熔断 1：扫描批量上限 ----
+    # ---- Breaker 1: batch size per scan ----
     def batch(self, invoices: list) -> tuple[list, list]:
-        """返回 (本批处理, 顺延到下一批)。"""
+        """Return (this batch, deferred to the next batch)."""
         cap = self.cfg.breaker["max_invoices_per_scan"]
         return invoices[:cap], invoices[cap:]
 
-    # ---- 熔断 2：连续发送失败 ----
+    # ---- Breaker 2: consecutive send failures ----
     def is_tripped(self, channel: str) -> bool:
         return channel in self.state.tripped
 
     def record_send(self, channel: str, ok: bool, on_date: date) -> bool:
-        """记录一次发送结果。返回 True 表示本次调用触发了熔断。"""
+        """Record one send result. Returns True if this call tripped the breaker."""
         if ok:
             self.state.consecutive_failures[channel] = 0
             key = on_date.isoformat()
@@ -71,7 +71,7 @@ class CircuitBreaker:
         return self.state.sends_by_date.get(on_date.isoformat(), 0)
 
     def reset(self, channel: str | None = None) -> None:
-        """人工确认渠道恢复后手动复位。刻意不做自动恢复 —— 熔断了就该有人去看一眼。"""
+        """Manual reset after a person confirms the channel is back. Deliberately no auto-recovery: a tripped breaker should get human eyes."""
         if channel:
             self.state.tripped.pop(channel, None)
             self.state.consecutive_failures[channel] = 0

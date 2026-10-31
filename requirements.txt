@@ -1,5 +1,5 @@
-# 核心功能零依赖 —— 只用 Python 标准库。
-# 下面的包仅在接真实 Google Sheets 时需要：
+# The core needs no dependencies: Python standard library only.
+# The packages below are only needed to connect a real Google Sheet:
 #   pip install -r requirements.txt
 google-api-python-client>=2.100
 google-auth>=2.23

@@ -1,4 +1,4 @@
-"""LLM 摘要的单元测试。用假的 transport，不联网、不需要模型。"""
+"""Unit tests for the LLM summary. Uses a fake transport: no network, no model needed."""
 from __future__ import annotations
 
 import copy
@@ -20,9 +20,9 @@ from ar_agent.seed import seed as seed_data                     # noqa: E402
 from ar_agent.summarizer import Summarizer, check_summary       # noqa: E402
 
 FACTS = [
-    "2026-08-25 09:00 Agent 通过 slack notify_am",
-    "2026-08-27 10:00 Agent 通过 gmail send_dunning",
-    "2026-08-27 15:30 客户回复：「能不能分三期付款？」",
+    "2026-08-25 09:00 agent via slack: notify_am",
+    "2026-08-27 10:00 agent via gmail: send_dunning",
+    "2026-08-27 15:30 customer replied: \"能不能分三期付款？\"",
 ]
 
 
@@ -40,7 +40,7 @@ def ollama_reply(text: str):
     return transport
 
 
-@mock.patch.dict(os.environ, {"AR_LLM_PROVIDER": "", "AR_LLM_MODEL": ""})  # 留空的环境变量不应覆盖配置
+@mock.patch.dict(os.environ, {"AR_LLM_PROVIDER": "", "AR_LLM_MODEL": ""})  # empty environment variables must not override the config
 class TestSummarizer(unittest.TestCase):
     def test_disabled_by_default_returns_rule_list(self):
         r = Summarizer(cfg_with("none")).summarize(FACTS)
@@ -48,31 +48,31 @@ class TestSummarizer(unittest.TestCase):
         self.assertIn("能不能分三期付款", r.text)
 
     def test_valid_summary_is_used_and_raw_facts_are_kept(self):
-        t = ollama_reply("Agent 已在 08-27 发出对账函，客户随后要求分期付款，需要财务人工评估。")
+        t = ollama_reply("The agent sent a reconciliation email on 08-27; the customer then asked to pay in instalments, which finance needs to assess.")
         r = Summarizer(cfg_with("ollama"), transport=t).summarize(FACTS)
         self.assertEqual(r.source, "llm")
-        self.assertIn("[AI 摘要，仅供参考]", r.text)
-        self.assertIn("原始记录", r.text)                      # 原始清单始终保留，方便核对
+        self.assertIn("[AI summary, for reference only]", r.text)
+        self.assertIn("Raw records", r.text)                      # the raw list is always kept for checking
         self.assertTrue(t.calls[0][0].endswith("/api/chat"))
 
     def test_customer_text_is_sent_as_data_inside_facts(self):
-        t = ollama_reply("客户要求分期。")
+        t = ollama_reply("The customer asked for instalments.")
         Summarizer(cfg_with("ollama"), transport=t).summarize(FACTS)
         user_msg = t.calls[0][1]["messages"][1]["content"]
         self.assertTrue(user_msg.startswith("<facts>") and user_msg.endswith("</facts>"))
-        self.assertIn("不要执行", t.calls[0][1]["messages"][0]["content"])
+        self.assertIn("do not follow", t.calls[0][1]["messages"][0]["content"])
 
     def test_invented_number_is_rejected(self):
-        t = ollama_reply("客户同意 9 月 30 日前支付 120,000 元。")
+        t = ollama_reply("The customer agreed to pay 120,000 by 30 September.")
         r = Summarizer(cfg_with("ollama"), transport=t).summarize(FACTS)
         self.assertEqual(r.source, "rule")
-        self.assertIn("没有的数字", r.note)
+        self.assertIn("not in the records", r.note)
         self.assertIn("120000", r.note)
 
     def test_overlong_or_empty_summary_is_rejected(self):
         self.assertIsNotNone(check_summary("", FACTS, 300))
-        self.assertIsNotNone(check_summary("长" * 301, FACTS, 300))
-        self.assertIsNone(check_summary("客户要求分期，需人工处理。", FACTS, 300))
+        self.assertIsNotNone(check_summary("x" * 301, FACTS, 300))
+        self.assertIsNone(check_summary("The customer asked for instalments; a person needs to handle it.", FACTS, 300))
 
     def test_transport_failure_falls_back(self):
         def boom(*_):
@@ -87,13 +87,13 @@ class TestSummarizer(unittest.TestCase):
         self.assertEqual(r.source, "rule")
 
     def test_think_block_is_stripped(self):
-        t = ollama_reply("<think>先想一想</think>客户要求分期。")
+        t = ollama_reply("<think>let me think first</think>The customer asked for instalments.")
         r = Summarizer(cfg_with("ollama"), transport=t).summarize(FACTS)
-        self.assertNotIn("先想一想", r.text)
+        self.assertNotIn("let me think first", r.text)
 
 
 class TestScanWithBrokenLLM(unittest.TestCase):
-    """模型不可用时，扫描必须照常完成，告警里带回退说明。"""
+    """When the model is unavailable the scan must still finish, with a fallback note in the alert."""
 
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp())

@@ -1,15 +1,15 @@
-"""客户回复解析 —— PM 文档 §4.2「任何还款条件变更关键词自动升级」。
+"""Customer reply parsing (product spec §4.2: "any keyword about changing payment terms escalates automatically").
 
-**这里刻意不用 LLM。**
+**No LLM here, on purpose.**
 
-文档原话：「规则不依赖 Agent 自己判断'这个诉求是否合理'，而是命中关键词类别就无条件升级」。
-用纯规则的三个理由：
-  1. 可审计 —— 命中了哪个词、属于哪一类，日志里一目了然，不需要解释模型为什么这么想；
-  2. 不可绕过 —— 不受 prompt injection 影响，客户在消息里写"忽略之前的指令"没有任何用；
-  3. 确定性 —— 同一条消息一万次跑出一万次相同结果，合规审查时能复现。
+From the spec: "the rule does not rely on the agent judging whether a request is reasonable; a matching keyword category escalates unconditionally."
+Three reasons for plain rules:
+  1. Auditable: the log shows exactly which word matched and which category it belongs to; no need to explain what a model was thinking;
+  2. Cannot be bypassed: immune to prompt injection; a customer writing "ignore previous instructions" achieves nothing;
+  3. Deterministic: the same message gives the same result every time, so a compliance review can reproduce it.
 
-LLM 在这个系统里的位置是**辅助解释**（生成升级摘要给财务看），而不是**决定是否升级**。
-判定权在规则层，解释权才交给模型 —— 这个分工是整套设计的关键。
+In this system the LLM **explains** (it writes the escalation summary for finance); it never **decides whether to escalate**.
+The rule layer holds the decision and the model only explains it; that split is the key to the whole design.
 """
 from __future__ import annotations
 
@@ -19,10 +19,10 @@ from enum import Enum
 
 
 class ReplyIntent(str, Enum):
-    TERMS_CHANGE = "terms_change"   # 分期/打折/延期 → 强制升级高风险
-    DISPUTE = "dispute"             # 对账争议/法务 → 强制升级高风险
-    PAID_CLAIM = "paid_claim"       # 声称已付款 → 转财务核账，停止催收
-    ACK = "ack"                     # 已读/承诺按时付 → 无需升级
+    TERMS_CHANGE = "terms_change"   # instalments / discount / extension -> forced to high risk
+    DISPUTE = "dispute"             # billing dispute / legal -> forced to high risk
+    PAID_CLAIM = "paid_claim"       # says it has paid -> finance checks the payment, collection stops
+    ACK = "ack"                     # acknowledged / promises to pay on time -> no escalation
     UNKNOWN = "unknown"
 
     @property
@@ -32,21 +32,21 @@ class ReplyIntent(str, Enum):
     @property
     def label(self) -> str:
         return {
-            "terms_change": "还款条件变更诉求",
-            "dispute": "账目争议 / 法务信号",
-            "paid_claim": "客户声称已付款",
-            "ack": "确认收到 / 承诺付款",
-            "unknown": "未识别",
+            "terms_change": "request to change payment terms",
+            "dispute": "billing dispute / legal signal",
+            "paid_claim": "customer says it has paid",
+            "ack": "acknowledged / promises to pay",
+            "unknown": "not recognised",
         }[self.value]
 
 
-#: 关键词表按类别组织，便于财务/合规同事直接维护，不需要开发介入。
-#: 以 "re:" 开头的条目按正则处理 —— 用来覆盖"分三期""分 6 期"这类带变量的说法。
-#: 纯字符串条目占多数，是有意的：财务同事能直接读懂、直接加词，不需要会写正则。
+#: Keywords are grouped by category so finance and compliance staff can maintain them without a developer.
+#: Entries starting with "re:" are regular expressions, used for phrasings with a variable such as "pay in 3 / 6 instalments".
+#: Most entries are plain strings on purpose: finance staff can read them and add words without knowing regex.
 KEYWORDS: dict[ReplyIntent, list[str]] = {
     ReplyIntent.TERMS_CHANGE: [
         "分期", "拆分付款", "分批付", "分几次",
-        r"re:分\s*[0-9一二两三四五六七八九十几]+\s*期",     # 分三期 / 分6期 / 分几期
+        r"re:分\s*[0-9一二两三四五六七八九十几]+\s*期",     # e.g. 分三期 / 分6期 / 分几期 (in 3 / 6 / several instalments)
         r"re:([0-9]+|[一二两三四五六七八九十])\s*期\s*(付|支付|结清)",
         "打折", "折扣", "优惠", "减免", "少付", "抹零",
         "延期", "延后", "宽限", "缓一缓", "缓几天", "展期", "推迟", "晚点付", "下个月再付",
@@ -68,9 +68,9 @@ KEYWORDS: dict[ReplyIntent, list[str]] = {
     ],
 }
 
-#: 判定优先级：一条消息可能同时命中多类，取风险最高的那一类。
-#: 例如"我们已经付了一部分，剩下的能不能分期" —— 同时命中 PAID_CLAIM 和 TERMS_CHANGE，
-#: 必须按 TERMS_CHANGE 处理（强制升级），绝不能因为先匹配到"已付"就放过。
+#: Priority: a message can match several categories; the highest-risk one wins.
+#: e.g. "we have paid part of it, can we pay the rest in instalments?" matches both PAID_CLAIM and TERMS_CHANGE,
+#: and must be handled as TERMS_CHANGE (forced escalation), never let through because "paid" matched first.
 PRIORITY = [
     ReplyIntent.TERMS_CHANGE,
     ReplyIntent.DISPUTE,
@@ -92,29 +92,29 @@ class ReplyAnalysis:
 
     def summary(self) -> str:
         if self.intent is ReplyIntent.UNKNOWN:
-            return "未命中任何关键词类别"
-        return f"{self.intent.label}（命中：{'、'.join(self.matched)}）"
+            return "no keyword category matched"
+        return f"{self.intent.label} (matched: {', '.join(self.matched)})"
 
 
 def _normalize(text: str) -> str:
-    """归一化，防止靠加空格/全角符号绕过关键词表。
+    """Normalise the text so that extra spaces or full-width characters cannot slip past the keyword list.
 
-    "分 期" / "分－期" / "ＦＥＮ" 这类变形是催收场景里真实会遇到的，
-    不一定是恶意，也可能只是输入法或复制粘贴带出来的。统一清洗后再匹配。
+    Variants such as "分 期" / "分－期" / "ＦＥＮ" really occur in collections,
+    not always on purpose; an input method or a copy-paste can produce them. Clean first, then match.
     """
     text = text or ""
-    # 全角转半角
+    # full-width to half-width
     text = "".join(
         chr(ord(ch) - 0xFEE0) if 0xFF01 <= ord(ch) <= 0xFF5E else ch for ch in text
     )
     text = text.replace("　", " ")
-    # 去掉中文之间的空白与常见分隔符（英文词之间的空格要保留）
+    # remove whitespace and common separators between CJK characters (spaces between English words are kept)
     text = re.sub(r"(?<=[一-鿿])[\s\-_·.、,，]+(?=[一-鿿])", "", text)
     return text.lower()
 
 
 def classify_reply(text: str) -> ReplyAnalysis:
-    """把一条客户回复归到意图类别。命中即事实，不做"合理性"判断。"""
+    """Assign a customer reply to an intent category. A match is a fact; no judgement of whether the request is reasonable."""
     norm = _normalize(text)
     hits: dict[ReplyIntent, list[str]] = {}
 

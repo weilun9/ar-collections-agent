@@ -1,6 +1,6 @@
-"""CSV 实现 —— 模拟 PM 文档里的 Google Sheets 财务系统。
+"""CSV implementation, standing in for the Google Sheets finance system in the product spec.
 
-CSV 可以直接用 Excel 打开，方便核对原始数据和 Agent 写回的内容。
+CSV opens directly in Excel, which makes it easy to check the source data and what the agent wrote back.
 """
 from __future__ import annotations
 
@@ -11,9 +11,9 @@ from ..models import Customer, Invoice
 from .base import ReceivablesStore
 
 INVOICE_COLUMNS = [
-    # 业务主数据（Agent 只读）
+    # Business master data (read-only for the agent)
     "invoice_id", "customer_id", "amount", "issue_date", "due_date", "status", "paid_date",
-    # Agent 状态字段（Agent 可写）
+    # Agent state fields (writable by the agent)
     "agent_tier", "agent_stage", "agent_state", "agent_last_action_at",
     "agent_buffer_until", "agent_owner", "agent_note",
 ]
@@ -47,7 +47,7 @@ class CsvStore(ReceivablesStore):
         tmp.replace(self.invoices_path)
 
     def update_agent_fields(self, invoice_id: str, **fields) -> None:
-        self._assert_writable(fields)          # ← L3 闸门，越权写入直接抛异常
+        self._assert_writable(fields)          # <- L3 gate: an unauthorised write raises immediately
         rows = self._read_raw()
         for row in rows:
             if row["invoice_id"].strip() == invoice_id:
@@ -55,11 +55,11 @@ class CsvStore(ReceivablesStore):
                     row[k] = "" if v is None else str(v)
                 break
         else:
-            raise KeyError(f"账款不存在: {invoice_id}")
+            raise KeyError(f"invoice not found: {invoice_id}")
         self._write_raw(rows)
 
     def bulk_update_agent_fields(self, updates: dict[str, dict]) -> None:
-        """批量写回，避免每条账款都重写一次整表。"""
+        """Write back in bulk instead of rewriting the whole table for every invoice."""
         for fields in updates.values():
             self._assert_writable(fields)
         rows = self._read_raw()

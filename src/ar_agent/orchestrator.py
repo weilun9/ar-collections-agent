@@ -1,14 +1,14 @@
-"""每日扫描主流程 —— PM 文档 §3.1。
+"""Daily scan pipeline (product spec §3.1).
 
-一条账款在一次扫描里的完整旅程：
+The full path of one invoice through one scan:
 
-    读取 → [熔断:批量上限] → 分级引擎(§4) → 收件箱意图(§4.2)
-         → L4 策略链 → 动作决策 → [熔断:发送失败] → 渠道发送 → 写回状态 → 审计日志
+    read -> [breaker: batch cap] -> tiering engine (§4) -> inbox intent (§4.2)
+         -> L4 policy chain -> action decision -> [breaker: send failures] -> channel send -> write back state -> audit log
 
-关于"Agent"这个词：这套流程的**决策部分完全是确定性代码**，没有一次 LLM 调用。
-LLM 在设计里的位置是可选增强（给高风险告警生成沟通历史摘要，见 summarize_history / summarizer.py），
-即使它完全不可用，催收流程照常跑、分级照常准。这是刻意的架构选择 ——
-把"不能出错的部分"和"出错也只是体验变差的部分"分开。
+About the word "agent": the **decision part of this pipeline is entirely deterministic code**, with no LLM call at all.
+The LLM is an optional extra (a contact-history summary for high-risk alerts; see summarize_history / summarizer.py),
+and even if it is completely unavailable, collection still runs and tiering is still correct. This is a deliberate architecture choice:
+keep the parts that must not fail apart from the parts where a failure only makes things less pleasant to read.
 """
 from __future__ import annotations
 
@@ -47,7 +47,7 @@ class ScanReport:
     run_id: str
     run_at: datetime
     scanned: int = 0
-    deferred: int = 0                 # 因批量上限顺延到下一批
+    deferred: int = 0                 # deferred to the next batch by the batch cap
     by_tier: dict[str, int] = field(default_factory=dict)
     actions: list[Decision] = field(default_factory=list)
     sends: list[tuple[str, str, bool]] = field(default_factory=list)
@@ -73,7 +73,7 @@ class Orchestrator:
         self.summarizer = Summarizer(self.cfg)
 
     # ------------------------------------------------------------------ #
-    # 收件箱
+    # Inbox
     # ------------------------------------------------------------------ #
     def _read_inbox(self) -> list[dict[str, str]]:
         if not self.inbox_path.exists():
@@ -89,10 +89,10 @@ class Orchestrator:
                 w.writerow({c: r.get(c, "") for c in INBOX_COLUMNS})
 
     def _pending_intents(self, upto: datetime) -> dict[str, tuple[str, str]]:
-        """扫描客户回复，返回 {invoice_id: (intent, summary)}。
+        """Scan customer replies and return {invoice_id: (intent, summary)}.
 
-        只看截止到 upto 的回复，这样 --date 回放历史时不会"看到未来的消息"。
-        同一账款有多条回复时，取风险最高的那条（TERMS_CHANGE > DISPUTE > ...）。
+        Only replies up to `upto` are used, so replaying history with --date never sees messages from the future.
+        When an invoice has several replies, the highest-risk one wins (TERMS_CHANGE > DISPUTE > ...).
         """
         result: dict[str, tuple[str, str]] = {}
         best_rank: dict[str, int] = {}
@@ -119,7 +119,7 @@ class Orchestrator:
         return result
 
     def process_inbox(self, upto: datetime | None = None) -> int:
-        """把收件箱里未处理的回复打上意图标签并落盘（供 Dashboard / 审计查看）。"""
+        """Tag unprocessed inbox replies with their intent and save them (for the dashboard and audits)."""
         upto = upto or datetime.now()
         rows = self._read_inbox()
         n = 0
@@ -142,7 +142,7 @@ class Orchestrator:
         return n
 
     # ------------------------------------------------------------------ #
-    # 决策
+    # Decisions
     # ------------------------------------------------------------------ #
     def decide(
         self,
@@ -172,19 +172,19 @@ class Orchestrator:
             detail={"days_overdue": tier_res.days_overdue, "halt": outcome.halt_all_sending},
         )
 
-        # ---- 终态：已结清 / 已被人接管 / 已升级，Agent 一律不动 ----
+        # ---- Final states: settled / taken over by a person / escalated; the agent does nothing ----
         if not inv.is_open():
             d.action = ActionType.SKIP
-            d.add_reason("账款已结清")
+            d.add_reason("invoice settled")
             return d
 
         state = AgentState(inv.agent_state) if inv.agent_state else AgentState.NEW
         if state in (AgentState.HUMAN_TAKEN, AgentState.ESCALATED):
             d.action = ActionType.HOLD
             d.add_reason(
-                "已由人工接管，Agent 停止一切动作"
+                "taken over by a person; the agent stops all actions"
                 if state is AgentState.HUMAN_TAKEN
-                else "已升级人工处理，Agent 不再对外发送"
+                else "escalated to a person; the agent no longer contacts the customer"
             )
             return d
 
@@ -192,24 +192,24 @@ class Orchestrator:
             d.action = ActionType.SKIP
             return d
 
-        # ---- 🔴 高风险：只通知人，绝不对外 ----
+        # ---- 🔴 High risk: notify people only, never contact the customer ----
         if d.tier is Tier.HIGH:
             d.action = ActionType.ESCALATE
             return d
 
-        # ---- 策略层禁止对外接触（VIP / 已付款声明 / 日发送量熔断等）----
+        # ---- Policy layer forbids customer contact (VIP / says it has paid / daily send cap, etc.) ----
         if not d.agent_may_contact_customer:
             d.action = ActionType.ESCALATE if outcome.tier is Tier.HIGH else ActionType.HOLD
             return d
 
-        # ---- 🟡 中度：48 小时缓冲期状态机 ----
+        # ---- 🟡 Medium: 48-hour buffer state machine ----
         if d.tier is Tier.MID:
             buffer_hours = self.cfg.cadence["mid_am_buffer_hours"]
             if state is not AgentState.AWAITING_AM or not inv.agent_buffer_until:
                 d.action = ActionType.SLACK_AM_NOTICE
                 d.detail["buffer_until"] = (now + timedelta(hours=buffer_hours)).isoformat(timespec="seconds")
                 d.detail["buffer_hours"] = buffer_hours
-                d.add_reason(f"通知客户经理 {cust.account_manager}，给予 {buffer_hours} 小时优先处理权")
+                d.add_reason(f"notified account manager {cust.account_manager}; {buffer_hours} hours of priority to act first")
                 return d
 
             deadline = datetime.fromisoformat(inv.agent_buffer_until)
@@ -217,28 +217,28 @@ class Orchestrator:
                 d.action = ActionType.HOLD
                 remaining = deadline - now
                 hrs = remaining.total_seconds() / 3600
-                d.add_reason(f"客户经理缓冲期内，剩余 {hrs:.1f} 小时，Agent 暂不动作")
+                d.add_reason(f"inside the account manager's buffer, {hrs:.1f} hours left; the agent waits")
                 return d
 
             d.action = ActionType.GMAIL_DUNNING
-            d.add_reason(f"客户经理 {cust.account_manager} 在 {buffer_hours} 小时内未响应，Agent 补位发送正式对账函")
+            d.add_reason(f"account manager {cust.account_manager} did not respond within {buffer_hours} hours; the agent steps in with a formal reconciliation email")
             d.detail["am_unresponsive"] = True
             return d
 
-        # ---- 🟢 轻度：按节奏自动跟进 ----
+        # ---- 🟢 Light: automatic follow-up on a cadence ----
         cad = self.cfg.cadence
         if inv.agent_stage >= cad["low_max_reminders"]:
             d.action = ActionType.HOLD
             d.add_reason(
-                f"已发出 {inv.agent_stage} 次提醒，达到轻度分级上限 "
-                f"{cad['low_max_reminders']} 次；继续逾期将自然升级为中度"
+                f"{inv.agent_stage} reminders sent, the light-tier maximum of "
+                f"{cad['low_max_reminders']}; if it stays overdue it will move up to medium"
             )
             return d
 
         if inv.agent_stage == 0:
             d.action = ActionType.WHATSAPP_REMINDER
             d.detail["template_id"] = "WA_LOW_1"
-            d.add_reason("首次自动提醒")
+            d.add_reason("first automatic reminder")
             return d
 
         gap = cad["low_second_reminder_gap_days"]
@@ -250,16 +250,16 @@ class Orchestrator:
                 since = gap
             if since < gap:
                 d.action = ActionType.HOLD
-                d.add_reason(f"距上次提醒 {since} 天，未满 {gap} 天间隔")
+                d.add_reason(f"{since} days since the last reminder; the {gap}-day gap has not passed")
                 return d
 
         d.action = ActionType.WHATSAPP_REMINDER
         d.detail["template_id"] = "WA_LOW_2"
-        d.add_reason(f"距上次提醒已满 {gap} 天，发送第 2 次提醒")
+        d.add_reason(f"{gap} days since the last reminder; sending reminder 2")
         return d
 
     # ------------------------------------------------------------------ #
-    # 执行
+    # Execution
     # ------------------------------------------------------------------ #
     def _vars(self, d: Decision, now: datetime) -> dict:
         inv, cust = d.invoice, d.customer
@@ -274,8 +274,8 @@ class Orchestrator:
             "due_date": inv.due_date.isoformat() if inv.due_date else "",
             "days_overdue": d.detail.get("days_overdue", 0),
             "payment_url": self.cfg.company["payment_portal_url"] + inv.invoice_id,
-            "reasons": "；".join(d.reasons) or "—",
-            "policy_hits": "；".join(d.policy_hits) or "无",
+            "reasons": "; ".join(d.reasons) or "—",
+            "policy_hits": "; ".join(d.policy_hits) or "none",
             "history": self.summarize_history(inv.invoice_id),
             "buffer_hours": d.detail.get("buffer_hours", self.cfg.cadence["mid_am_buffer_hours"]),
             "buffer_until": d.detail.get("buffer_until", ""),
@@ -285,33 +285,33 @@ class Orchestrator:
         }
 
     def history_facts(self, invoice_id: str) -> list[str]:
-        """确定性的沟通事实清单(最近 5 条动作 + 3 条客户回复)，按时间排序。"""
+        """Deterministic list of contact facts (last 5 actions + 3 customer replies), in time order."""
         rows = [r for r in self.audit.read_all() if r.get("invoice_id") == invoice_id]
         replies = [r for r in self._read_inbox() if r.get("invoice_id") == invoice_id]
         parts = []
         for r in rows[-5:]:
             if r.get("action") in ("hold", "skip"):
                 continue
-            who = "Agent" if r.get("actor") == "agent" else "人工"
-            parts.append(f"{r.get('timestamp', '')[:16]} {who} 通过 {r.get('channel') or '-'} {r.get('action')}")
+            who = "agent" if r.get("actor") == "agent" else "person"
+            parts.append(f"{r.get('timestamp', '')[:16]} {who} via {r.get('channel') or '-'}: {r.get('action')}")
         for r in replies[-3:]:
             txt = (r.get("text") or "").replace("\n", " ")[:60]
-            parts.append(f"{(r.get('received_at') or '')[:16]} 客户回复：「{txt}」")
+            parts.append(f"{(r.get('received_at') or '')[:16]} customer replied: \"{txt}\"")
         return sorted(parts)
 
     def summarize_history(self, invoice_id: str) -> str:
-        """沟通历史摘要，附在高风险告警里给财务看 —— 整个 Agent 唯一调用 LLM 的位置。
+        """Contact-history summary attached to high-risk alerts for finance: the only LLM call in the whole agent.
 
-        配置了 llm.provider 时由模型压缩成一段话，并保留原始记录供核对；
-        未配置、调用失败或摘要未通过校验时，回退为确定性清单。详见 summarizer.py。
+        With llm.provider configured, a model condenses it into a paragraph and the raw records are kept for checking;
+        if it is not configured, the call fails or the summary fails the check, it falls back to the deterministic list. See summarizer.py.
         """
         result = self.summarizer.summarize(self.history_facts(invoice_id))
         if result.note:
-            return f"{result.text}\n  （{result.note}）"
+            return f"{result.text}\n  ({result.note})"
         return result.text
 
     _ACTION_PLAN: dict[ActionType, tuple[str, str]] = {
-        ActionType.WHATSAPP_REMINDER: ("whatsapp", ""),          # 模板由 decide() 指定
+        ActionType.WHATSAPP_REMINDER: ("whatsapp", ""),          # template chosen in decide()
         ActionType.GMAIL_DUNNING: ("gmail", "MAIL_MID_DUNNING"),
         ActionType.SLACK_AM_NOTICE: ("slack", "SLACK_AM_BUFFER"),
     }
@@ -335,7 +335,7 @@ class Orchestrator:
             channel = self.channels[channel_key]
             if self.breaker.is_tripped(channel.name):
                 log(d.action.value, channel.name, to, template_id, "blocked", "0",
-                    "渠道已熔断，跳过")
+                    "channel breaker tripped; skipped")
                 return False
             variables = self._vars(d, now)
             subject, body = tpl.render(template_id, variables)
@@ -352,17 +352,17 @@ class Orchestrator:
                 "1" if res.ok else "0", body[:160].replace("\n", " "))
             if tripped:
                 self._alert_breaker(channel.name, report, now,
-                                    f"连续 {self.cfg.breaker['consecutive_send_failures_to_pause']} 次发送失败")
+                                    f"{self.cfg.breaker['consecutive_send_failures_to_pause']} consecutive send failures")
             return res.ok
 
-        # ---------------- 各动作分支 ----------------
+        # ---------------- One branch per action ----------------
         if d.action in (ActionType.SKIP, ActionType.HOLD):
             if not inv.is_open():
                 updates["agent_state"] = AgentState.CLOSED.value
-            log(d.action.value, preview="；".join(d.reasons)[:160])
+            log(d.action.value, preview="; ".join(d.reasons)[:160])
 
         elif d.action is ActionType.ESCALATE:
-            # 高风险：Slack + 邮件双通道通知内部，**不对客户发送任何内容**
+            # High risk: notify the team on Slack and by email, **send nothing to the customer**
             deliver("slack", "SLACK_HIGH_ALERT", cust.am_slack_id or "#ar-alerts")
             d_action_backup = d.action
             d.action = ActionType.GMAIL_FINANCE_ALERT
@@ -370,7 +370,7 @@ class Orchestrator:
             d.action = d_action_backup
             updates["agent_state"] = AgentState.ESCALATED.value
             updates["agent_owner"] = "finance_lead"
-            updates["agent_note"] = "；".join(d.policy_hits or d.reasons)[:200]
+            updates["agent_note"] = "; ".join(d.policy_hits or d.reasons)[:200]
             updates["agent_last_action_at"] = now.isoformat(timespec="seconds")
             report.escalations.append(inv.invoice_id)
 
@@ -394,7 +394,7 @@ class Orchestrator:
                 updates["agent_stage"] = inv.agent_stage + 1
                 updates["agent_state"] = AgentState.AUTO.value
                 updates["agent_last_action_at"] = now.isoformat(timespec="seconds")
-                updates["agent_note"] = "客户经理未在缓冲期内响应，Agent 补位"
+                updates["agent_note"] = "account manager did not respond within the buffer; the agent stepped in"
 
         self.store.update_agent_fields(inv.invoice_id, **updates)
 
@@ -411,14 +411,14 @@ class Orchestrator:
         )
 
     # ------------------------------------------------------------------ #
-    # 主入口
+    # Main entry point
     # ------------------------------------------------------------------ #
     def daily_scan(self, now: datetime | None = None, dry_plan: bool = False) -> ScanReport:
         now = now or datetime.now()
         report = ScanReport(run_id=uuid.uuid4().hex[:8], run_at=now)
 
-        # 预演模式必须完全无副作用：matrix 命令和 Dashboard 都走这条路径，
-        # 一个"只是看看"的操作不该把收件箱标记成已处理。
+        # A dry plan must have no side effects at all: the matrix command and the dashboard both use this path,
+        # and just looking should never mark inbox messages as processed.
         if not dry_plan:
             report.inbound_processed = self.process_inbox(upto=now)
         intents = self._pending_intents(upto=now)
@@ -426,15 +426,15 @@ class Orchestrator:
         customers = self.store.load_customers()
         invoices = [i for i in self.store.load_invoices()]
 
-        # L6 熔断 1：单次扫描批量上限
+        # L6 breaker 1: batch cap per scan
         batch, deferred = self.breaker.batch(invoices)
         report.deferred = len(deferred)
         if deferred and not dry_plan:
             self.audit.write(
                 timestamp=now.isoformat(timespec="seconds"), run_id=report.run_id,
                 actor=Actor.SYSTEM.value, action="batch_capped",
-                reasons=[f"本次扫描 {len(batch)} 条，{len(deferred)} 条顺延至下一批"
-                         f"（上限 {self.cfg.breaker['max_invoices_per_scan']}）"],
+                reasons=[f"this scan: {len(batch)} invoices; {len(deferred)} deferred to the next batch "
+                         f"(cap {self.cfg.breaker['max_invoices_per_scan']})"],
             )
 
         sends_today = self.breaker.sends_on(now.date())
@@ -445,7 +445,7 @@ class Orchestrator:
                 self.audit.write(
                     timestamp=now.isoformat(timespec="seconds"), run_id=report.run_id,
                     actor=Actor.SYSTEM.value, invoice_id=inv.invoice_id, action="skip",
-                    reasons=[f"客户主数据缺失: {inv.customer_id}"],
+                    reasons=[f"customer master data missing: {inv.customer_id}"],
                 )
                 continue
 
@@ -456,7 +456,7 @@ class Orchestrator:
 
             if d.detail.get("halt") and not report.halted:
                 report.halted = True
-                report.halt_reason = f"单日对外发送量已达上限 {self.cfg.policy['daily_send_cap']} 条"
+                report.halt_reason = f"daily customer send cap of {self.cfg.policy['daily_send_cap']} reached"
                 self._alert_breaker("all", report, now, report.halt_reason)
 
             if dry_plan:
@@ -469,13 +469,13 @@ class Orchestrator:
         return report
 
     # ------------------------------------------------------------------ #
-    # 人工接管
+    # Human takeover
     # ------------------------------------------------------------------ #
     def takeover(self, invoice_id: str, by: str, note: str = "") -> None:
-        """客户经理/财务显式接管一条账款，Agent 立即停止对它的一切动作。
+        """An account manager or finance explicitly takes over an invoice; the agent stops all actions on it at once.
 
-        刻意做成显式命令而不是"在 Slack 回一句话就算接管"：
-        接管是一次授权变更，需要一个明确的、可审计的动作。
+        Deliberately an explicit command rather than "replying in Slack counts as a takeover":
+        a takeover changes who is authorised to act, so it needs a clear, auditable action.
         """
         now = datetime.now()
         self.store.update_agent_fields(
@@ -483,34 +483,34 @@ class Orchestrator:
             agent_state=AgentState.HUMAN_TAKEN.value,
             agent_owner=by,
             agent_last_action_at=now.isoformat(timespec="seconds"),
-            agent_note=note or f"{by} 于 {now:%Y-%m-%d %H:%M} 接管",
+            agent_note=note or f"taken over by {by} at {now:%Y-%m-%d %H:%M}",
         )
         self.audit.write(
             timestamp=now.isoformat(timespec="seconds"), run_id="manual",
             actor=Actor.HUMAN.value, invoice_id=invoice_id, action="takeover",
-            reasons=[f"{by} 接管，Agent 停止自动跟进"], content_preview=note,
+            reasons=[f"taken over by {by}; the agent stops automatic follow-up"], content_preview=note,
         )
 
     def release(self, invoice_id: str, by: str) -> None:
-        """人工放回给 Agent 继续跟进。"""
+        """A person hands the invoice back to the agent for follow-up."""
         now = datetime.now()
         self.store.update_agent_fields(
             invoice_id,
             agent_state=AgentState.NEW.value, agent_owner="", agent_buffer_until="",
-            agent_note=f"{by} 于 {now:%Y-%m-%d %H:%M} 交回 Agent",
+            agent_note=f"handed back to the agent by {by} at {now:%Y-%m-%d %H:%M}",
         )
         self.audit.write(
             timestamp=now.isoformat(timespec="seconds"), run_id="manual",
             actor=Actor.HUMAN.value, invoice_id=invoice_id, action="release",
-            reasons=[f"{by} 交回 Agent 继续跟进"],
+            reasons=[f"{by} handed the invoice back to the agent"],
         )
 
     def mark_paid(self, invoice_id: str, on: date | None = None) -> None:
-        """标记已回款。
+        """Mark an invoice as paid.
 
-        注意：这个方法**不属于 Agent 的能力** —— 它写的是 status/paid_date 这类业务字段，
-        而 Agent 的 Service Account 对这些字段没有写权限（见 store/base.py 白名单）。
-        这里走的是财务人员身份的直接改表，CLI 里也标注为人工动作。
+        Note: this method is **not an agent capability**. It writes business fields such as status/paid_date,
+        and the agent's service account has no write permission on them (see the allow-list in store/base.py).
+        This is a direct table edit under a finance user's identity, and the CLI labels it as a human action.
         """
         rows = self.store._read_raw()
         on = on or date.today()
@@ -521,9 +521,9 @@ class Orchestrator:
                 row["agent_state"] = AgentState.CLOSED.value
                 break
         else:
-            raise KeyError(f"账款不存在: {invoice_id}")
+            raise KeyError(f"invoice not found: {invoice_id}")
         self.store._write_raw(rows)
         self.audit.write(
             run_id="manual", actor=Actor.HUMAN.value, invoice_id=invoice_id,
-            action="mark_paid", reasons=[f"财务确认回款 {on.isoformat()}"],
+            action="mark_paid", reasons=[f"finance confirmed payment received {on.isoformat()}"],
         )

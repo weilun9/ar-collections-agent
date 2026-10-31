@@ -1,12 +1,12 @@
-"""Google Sheets 实现 —— 生产形态的占位适配器。
+"""Google Sheets implementation: a placeholder adapter for the production setup.
 
-演示默认用 CsvStore；接真实 Sheets 时安装 google-api-python-client 并填 .env：
+The default is CsvStore; to use real Sheets, install google-api-python-client and set in .env:
     GOOGLE_SERVICE_ACCOUNT_JSON=C:\path\to\sa.json
     GOOGLE_SHEET_ID=1AbC...
 
-L3 设计要点：给这个 Service Account 授的是**表级共享 + 代码级字段白名单**双层限制。
-Sheets API 本身没有列级权限，所以字段白名单由 base.ReceivablesStore._assert_writable 在
-代码层强制；真正上生产应改用有列级权限的数据库视图，把这层下沉到数据库。
+L3 design: this service account is limited twice, **by sheet-level sharing and by a field allow-list in code**.
+The Sheets API has no column-level permissions, so the field allow-list is enforced in code by
+base.ReceivablesStore._assert_writable; a production system should use a database view with column-level permissions instead.
 """
 from __future__ import annotations
 
@@ -60,7 +60,7 @@ class GoogleSheetsStore(ReceivablesStore):
             (i + 1 for i, r in enumerate(values) if r and r[0].strip() == invoice_id), None
         )
         if row_no is None:
-            raise KeyError(f"账款不存在: {invoice_id}")
+            raise KeyError(f"invoice not found: {invoice_id}")
         data = []
         for k, v in fields.items():
             col_idx = header.index(k) if k in header else INVOICE_COLUMNS.index(k)

@@ -1,15 +1,15 @@
-"""周报层 —— PM 文档 §3.1 + §6 成功指标。
+"""Weekly report (product spec §3.1 + §6 success metrics).
 
-给 CFO 的那份「不用追着财务要的、随时能看的逾期健康度报告」。
+The CFO's "overdue health report I can read any time without chasing finance".
 
-报告结构刻意分三段，对应 §6 的指标设计：
-    1. 现金流健康度   —— North Star 与账龄结构
-    2. Agent 运行情况 —— 自动化占比、响应时效、覆盖率
-    3. 护栏指标       —— 反向指标，专门回答"有没有为了效率牺牲客户关系"
+The report has three parts on purpose, matching the metric design in §6:
+    1. Cash-flow health   -- the North Star and the ageing profile
+    2. Agent operations   -- automation share, response time, coverage
+    3. Guardrail metrics  -- counter-metrics that answer "did efficiency cost us customer relationships?"
 
-第 3 段放在报告里而不是藏在监控后台，是有意的：
-如果护栏指标只有做系统的人看得到，它就不会真正约束决策。
-让 CFO 每周都看见"VIP 被自动催收 0 次"，这个数字才有分量。
+Part 3 sits in the report rather than a monitoring back end on purpose:
+if only the people building the system can see the guardrail metrics, they never really constrain decisions.
+The figure "VIP customers chased automatically: 0" only carries weight when the CFO sees it every week.
 """
 from __future__ import annotations
 
@@ -24,8 +24,8 @@ from .config import Config
 from .models import Customer, Invoice, Tier
 from .store import CsvStore
 
-AGING_BUCKETS = [(1, 14, "1-14 天"), (15, 30, "15-30 天"),
-                 (31, 60, "31-60 天"), (61, 10**6, "60 天以上")]
+AGING_BUCKETS = [(1, 14, "1-14 days"), (15, 30, "15-30 days"),
+                 (31, 60, "31-60 days"), (61, 10**6, "over 60 days")]
 
 
 @dataclass
@@ -70,9 +70,9 @@ def compute(root: Path, cfg: Config, as_of: date | None = None) -> WeeklyMetrics
     m.overdue_count = len(overdue)
     m.overdue_amount = sum(i.amount for i in overdue)
 
-    # DSO 近似：按金额加权的平均在外天数。
-    # 严格 DSO 需要期间赊销收入，那个数字在 ERP 里、不在这张应收表上。
-    # 这里用加权账龄作为代理指标，并在报告里明确标注 —— 宁可标注清楚，不要给一个看着精确的错数。
+    # DSO approximation: amount-weighted average days outstanding.
+    # True DSO needs credit sales for the period, which live in the ERP, not in this receivables table.
+    # The weighted age is used as a proxy and labelled as such in the report: better clearly labelled than precise-looking and wrong.
     if m.total_open_amount:
         weighted = sum(i.amount * max((as_of - i.issue_date).days, 0) for i in open_invoices)
         m.dso_proxy = weighted / m.total_open_amount
@@ -86,23 +86,23 @@ def compute(root: Path, cfg: Config, as_of: date | None = None) -> WeeklyMetrics
         m.tier_amount[t] = m.tier_amount.get(t, 0.0) + i.amount
         m.tier_count[t] = m.tier_count.get(t, 0) + 1
 
-    # ---- Agent vs 人工 ----
+    # ---- Agent vs people ----
     real_actions = [r for r in log if r.get("action") not in ("hold", "skip", "batch_capped", "")]
     m.agent_actions = sum(1 for r in real_actions if r.get("actor") == "agent")
     m.human_actions = sum(1 for r in real_actions if r.get("actor") == "human")
 
-    # ---- 覆盖率：每一条逾期账款是否都被系统处理过（目标 100%，零漏单）----
+    # ---- Coverage: has every overdue invoice been handled by the system (target 100%, none missed) ----
     touched = {r["invoice_id"] for r in log if r.get("invoice_id")}
     if overdue:
         m.coverage_rate = len([i for i in overdue if i.invoice_id in touched]) / len(overdue) * 100
 
-    # ---- 首次触达时效：逾期后多久发出第一次动作 ----
+    # ---- Time to first touch: how long after going overdue the first action is sent ----
     #
-    # 口径说明：
-    # 只统计**系统上线之后才逾期**的账款。上线那天存量里已经逾期 60 天的账款，
-    # 它的"首次触达 = 1440 小时"反映的是上线前的历史欠账，不是 Agent 的响应速度。
-    # 把存量算进来会得到一个又大又没意义的数字；而剔除存量之后，
-    # 这个指标才真正回答"从今往后，一笔账逾期多久会被跟进"。
+    # Definition:
+    # only invoices that became overdue **after the system went live** are counted. An invoice already 60 days overdue on day one
+    # would show "first touch = 1440 hours", which measures old debt from before go-live, not the agent's response time.
+    # Including that backlog gives a large, meaningless number; excluding it,
+    # the metric really answers "from now on, how long after going overdue is an invoice followed up?"
     inv_map = {i.invoice_id: i for i in invoices}
     go_live: datetime | None = None
     for r in log:
@@ -130,13 +130,13 @@ def compute(root: Path, cfg: Config, as_of: date | None = None) -> WeeklyMetrics
             acted = datetime.fromisoformat(ts)
         except ValueError:
             continue
-        # 逾期起算点是到期日的**次日零点**：到期日当天付款仍算准时
-        # （与 days_overdue >= 1 的判定保持一致）。
-        # 若从到期日零点起算，每一笔都会虚增 24 小时，指标就没法跟"<24 小时"的目标比。
+        # The overdue clock starts at **midnight after** the due date: paying on the due date is still on time
+        # (consistent with the days_overdue >= 1 rule).
+        # Starting from midnight of the due date would add 24 hours to every invoice and make the "< 24 hours" target meaningless.
         overdue_since = datetime.combine(inv.due_date + timedelta(days=1), datetime.min.time())
         if go_live is not None and overdue_since < go_live.replace(
                 hour=0, minute=0, second=0, microsecond=0):
-            backlog += 1                      # 上线前就已逾期 → 存量，不计入
+            backlog += 1                      # already overdue before go-live -> backlog, not counted
             continue
         hours = (acted - overdue_since).total_seconds() / 3600
         if hours >= 0:
@@ -146,10 +146,10 @@ def compute(root: Path, cfg: Config, as_of: date | None = None) -> WeeklyMetrics
         m.first_touch_hours = sum(gaps) / len(gaps)
         m.first_touch_sample = len(gaps)
 
-    # ---- 客户经理未响应（§八 Q2：这本身是个管理信号）----
+    # ---- Account manager did not respond (spec Q2: a management signal in itself) ----
     unresponsive: dict[str, list] = defaultdict(list)
     for r in log:
-        if "未在缓冲期内响应" in (r.get("reasons") or "") or "未响应" in (r.get("reasons") or ""):
+        if "did not respond" in (r.get("reasons") or "") or "未响应" in (r.get("reasons") or ""):  # second check matches logs from older versions
             inv = inv_map.get(r.get("invoice_id", ""))
             if inv:
                 cust = customers.get(inv.customer_id)
@@ -160,16 +160,16 @@ def compute(root: Path, cfg: Config, as_of: date | None = None) -> WeeklyMetrics
         for am, v in sorted(unresponsive.items(), key=lambda kv: -len(kv[1]))
     ]
 
-    # ---- 护栏指标 ----
+    # ---- Guardrail metrics ----
     vip_ids = {c.customer_id for c in customers.values() if c.is_vip}
     m.vip_auto_contacted = sum(
         1 for r in log
         if r.get("actor") == "agent"
         and r.get("customer_id") in vip_ids
-        and r.get("channel") in ("whatsapp", "gmail")      # 只算对外渠道
+        and r.get("channel") in ("whatsapp", "gmail")      # customer-facing channels only
         and r.get("ok") == "1"
     )
-    # 错误升级率：本该转人工却被 Agent 自动对外处理的条数
+    # Wrong-escalation count: invoices that should have gone to a person but were contacted automatically by the agent
     m.wrong_escalations = sum(
         1 for r in log
         if r.get("actor") == "agent"
@@ -211,93 +211,93 @@ def render_markdown(m: WeeklyMetrics, cfg: Config) -> str:
     L: list[str] = []
     add = L.append
 
-    add(f"# 应收账款健康度周报")
-    add(f"\n**{cfg.company['name']}** · 统计区间 {period_start} ~ {m.as_of}\n")
-    add("> 本报告由应收账款 Agent 自动生成。所有对外催收动作的完整记录见 `data/action_log.csv`。\n")
+    add(f"# Accounts Receivable Health · Weekly Report")
+    add(f"\n**{cfg.company['name']}** · period {period_start} to {m.as_of}\n")
+    add("> Generated automatically by the AR collections agent. The full record of every customer-facing action is in `data/action_log.csv`.\n")
 
-    add("\n## 一、现金流健康度\n")
-    add("| 指标 | 数值 |")
+    add("\n## 1. Cash-flow health\n")
+    add("| Metric | Value |")
     add("|---|---|")
-    add(f"| 未结清应收总额 | {_money(m.total_open_amount)}（{m.open_count} 笔） |")
-    add(f"| 其中已逾期 | **{_money(m.overdue_amount)}**（{m.overdue_count} 笔） |")
+    add(f"| Total open receivables | {_money(m.total_open_amount)} ({m.open_count} invoices) |")
+    add(f"| Of which overdue | **{_money(m.overdue_amount)}** ({m.overdue_count} invoices) |")
     pct = (m.overdue_amount / m.total_open_amount * 100) if m.total_open_amount else 0
-    add(f"| 逾期占比 | {pct:.1f}% |")
-    add(f"| 加权平均在外天数（DSO 代理指标） | {m.dso_proxy:.1f} 天 |")
-    add("\n> DSO 代理指标 = Σ(金额 × 在外天数) / Σ(金额)。"
-        "严格 DSO 需要期间赊销收入，该数据在 ERP 侧，接入后可替换为标准口径。\n")
+    add(f"| Overdue share | {pct:.1f}% |")
+    add(f"| Weighted average days outstanding (DSO proxy) | {m.dso_proxy:.1f} days |")
+    add("\n> DSO proxy = Σ(amount × days outstanding) / Σ(amount). "
+        "True DSO needs credit sales for the period, which sit in the ERP; once connected, the standard definition can replace it.\n")
 
-    add("\n### 账龄分布\n")
-    add("| 账龄 | 笔数 | 金额 | 占逾期额 |")
+    add("\n### Ageing\n")
+    add("| Age | Invoices | Amount | Share of overdue |")
     add("|---|---:|---:|---:|")
     for _, _, label in AGING_BUCKETS:
         b = m.aging.get(label, {"count": 0, "amount": 0})
         share = (b["amount"] / m.overdue_amount * 100) if m.overdue_amount else 0
         add(f"| {label} | {b['count']} | {_money(b['amount'])} | {share:.1f}% |")
 
-    add("\n### 风险分级分布\n")
-    add("| 分级 | 笔数 | 金额 |")
+    add("\n### Risk tiers\n")
+    add("| Tier | Invoices | Amount |")
     add("|---|---:|---:|")
-    for tier, label in [("low", "🟢 轻度"), ("mid", "🟡 中度"), ("high", "🔴 高风险")]:
+    for tier, label in [("low", "🟢 Light"), ("mid", "🟡 Medium"), ("high", "🔴 High risk")]:
         add(f"| {label} | {m.tier_count.get(tier, 0)} | {_money(m.tier_amount.get(tier, 0))} |")
 
-    add("\n## 二、Agent 运行情况\n")
+    add("\n## 2. Agent operations\n")
     total = m.agent_actions + m.human_actions
     auto_pct = (m.agent_actions / total * 100) if total else 0
-    add("| 指标 | 数值 | 目标 |")
+    add("| Metric | Value | Target |")
     add("|---|---|---|")
-    add(f"| Agent 自主完成动作 | {m.agent_actions} 条（{auto_pct:.0f}%） | 轻度分级 80% 自主 |")
-    add(f"| 人工介入动作 | {m.human_actions} 条 | — |")
-    add(f"| 逾期账款覆盖率 | **{m.coverage_rate:.0f}%** | 100%（零漏单） |")
+    add(f"| Actions completed by the agent | {m.agent_actions} ({auto_pct:.0f}%) | 80% autonomous on the light tier |")
+    add(f"| Actions by people | {m.human_actions} | — |")
+    add(f"| Overdue invoice coverage | **{m.coverage_rate:.0f}%** | 100% (none missed) |")
     if m.first_touch_hours is not None:
-        add(f"| 逾期后首次触达 | **{m.first_touch_hours:.1f} 小时**"
-            f"（{m.first_touch_sample} 笔样本） | < 24 小时（原 5-7 天） |")
+        add(f"| First touch after going overdue | **{m.first_touch_hours:.1f} hours**"
+            f" ({m.first_touch_sample} invoices sampled) | < 24 hours (previously 5-7 days) |")
     else:
-        add("| 逾期后首次触达 | 样本不足 | < 24 小时（原 5-7 天） |")
+        add("| First touch after going overdue | not enough data | < 24 hours (previously 5-7 days) |")
     if m.first_touch_backlog_excluded:
-        add("\n> 首次触达时效只统计系统上线后新逾期的账款；"
-            f"上线时已存在的 {m.first_touch_backlog_excluded} 笔存量逾期不计入 —— "
-            "它们的账龄反映的是上线前的历史欠账，不是 Agent 的响应速度。\n")
+        add("\n> Time to first touch only counts invoices that became overdue after go-live; "
+            f"the {m.first_touch_backlog_excluded} invoices already overdue at go-live are excluded, "
+            "because their age reflects old debt from before go-live, not the agent's response time.\n")
 
     if m.am_unresponsive:
-        add("\n### 客户经理缓冲期响应情况\n")
-        add("> 中风险账款进入 48 小时缓冲期后，客户经理未在期限内接管的条数。"
-            "这本身是一个管理信号，反映响应及时性。\n")
-        add("| 客户经理 | 未响应条数 | 涉及账款 |")
+        add("\n### Account manager response within the buffer\n")
+        add("> Medium-risk invoices whose account manager did not take over within the 48-hour buffer. "
+            "This is a management signal in itself, showing how promptly people respond.\n")
+        add("| Account manager | Not responded | Invoices |")
         add("|---|---:|---|")
         for r in m.am_unresponsive:
             add(f"| {r['account_manager']} | {r['count']} | {', '.join(r['invoices'])} |")
 
-    add("\n## 三、护栏指标（反向指标）\n")
-    add("> 这一段回答的是：为了效率，我们有没有牺牲客户关系。\n")
-    add("| 指标 | 本期 | 目标 | 状态 |")
+    add("\n## 3. Guardrail metrics (counter-metrics)\n")
+    add("> This part answers one question: did we trade customer relationships for efficiency?\n")
+    add("| Metric | This period | Target | Status |")
     add("|---|---:|---:|---|")
-    ok = lambda v: "✅ 达标" if v == 0 else "⚠️ 需复核"       # noqa: E731
-    add(f"| VIP 客户被 Agent 自动催收次数 | {m.vip_auto_contacted} | 0 | {ok(m.vip_auto_contacted)} |")
-    add(f"| 错误升级（该转人工却自动对外） | {m.wrong_escalations} | 0 | {ok(m.wrong_escalations)} |")
+    ok = lambda v: "✅ on target" if v == 0 else "⚠️ needs review"       # noqa: E731
+    add(f"| VIP customers chased automatically by the agent | {m.vip_auto_contacted} | 0 | {ok(m.vip_auto_contacted)} |")
+    add(f"| Wrong escalations (should have gone to a person, contacted automatically) | {m.wrong_escalations} | 0 | {ok(m.wrong_escalations)} |")
 
     if m.escalated:
-        add("\n## 四、需要人工决策的高风险账款\n")
-        add("> 以下账款系统**未向客户发送任何自动消息**，等待人工决定下一步。\n")
-        add("| 发票 | 客户 | 金额 | 逾期 | 升级原因 |")
+        add("\n## 4. High-risk invoices awaiting a human decision\n")
+        add("> The system has **sent no automated message** to these customers; a person must decide the next step.\n")
+        add("| Invoice | Customer | Amount | Overdue | Escalation reason |")
         add("|---|---|---:|---:|---|")
         for e in m.escalated[:15]:
             add(f"| {e['invoice_id']} | {e['customer']} | {_money(e['amount'])} | "
-                f"{e['days']} 天 | {e['note'][:60]} |")
+                f"{e['days']} days | {e['note'][:60]} |")
 
     if m.top_exposure:
-        add("\n## 五、逾期敞口 Top 5 客户\n")
-        add("| 客户 | 逾期金额 |")
+        add("\n## 5. Top 5 customers by overdue exposure\n")
+        add("| Customer | Overdue amount |")
         add("|---|---:|")
         for e in m.top_exposure:
             tag = " ⭐VIP" if e["vip"] else ""
             add(f"| {e['customer']}{tag} | {_money(e['amount'])} |")
 
-    add(f"\n---\n*生成时间：{datetime.now():%Y-%m-%d %H:%M}*")
+    add(f"\n---\n*Generated: {datetime.now():%Y-%m-%d %H:%M}*")
     return "\n".join(L)
 
 
 def render_html(markdown_text: str, m: WeeklyMetrics, cfg: Config) -> str:
-    """极简 Markdown → HTML（只处理本报告用到的语法，不引第三方库）。"""
+    """Minimal Markdown -> HTML (only the syntax this report uses; no third-party library)."""
     out: list[str] = []
     in_table = False
     for line in markdown_text.split("\n"):
@@ -335,8 +335,8 @@ def render_html(markdown_text: str, m: WeeklyMetrics, cfg: Config) -> str:
 
     body = "\n".join(out)
     return f"""<!doctype html>
-<html lang="zh-CN"><head><meta charset="utf-8">
-<title>应收账款健康度周报 · {m.as_of}</title>
+<html lang="en"><head><meta charset="utf-8">
+<title>Accounts Receivable Weekly Report · {m.as_of}</title>
 <style>
  body{{font-family:-apple-system,"Segoe UI","Microsoft YaHei",sans-serif;max-width:900px;
       margin:0 auto;padding:40px 24px;color:#1a1a1a;line-height:1.7;background:#fff}}
