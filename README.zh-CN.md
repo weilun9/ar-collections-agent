@@ -4,6 +4,8 @@ PM 方案文档的可运行实现。[`docs/PRD.zh-CN.md`](docs/PRD.zh-CN.md) 里
 ——三级决策矩阵、48 小时缓冲期、关键词强制升级、七层风险边界——
 在这里都有对应的代码，并且都能当场跑给人看。
 
+架构文档（英文）：[`docs/architecture.md`](docs/architecture.md)；设计取舍问答：[`docs/interview_notes.md`](docs/interview_notes.md)。
+
 **纯 Python 标准库，零第三方依赖。** 演示环境少一个依赖，就少一个当天出错的可能。
 
 ---
@@ -54,11 +56,12 @@ python ar.py demo
 | `python ar.py dashboard` | 可视化面板 → http://127.0.0.1:8787/ |
 | `python ar.py takeover INV-2010 --by 王磊` | 人工接管，Agent 立即停手 |
 | `python ar.py reply INV-2005 --text "能不能分三期"` | 模拟客户回复，触发强制升级 |
-| `python -m unittest discover -s tests` | 74 项单元测试 |
+| `pip install -r requirements-dev.txt && pytest` | 112 项测试，离线运行、无需 API key（也可直接 `python -m unittest discover -s tests`） |
 
-推演时间线是最好用的演示手法：
+推演时间线是最好用的演示手法。`seed` 默认以今天为锚点日，所以先按演示锚点日重新生成数据：
 
 ```bash
+python ar.py seed --today 2026-08-25
 python ar.py scan --date "2026-08-25 09:00"
 ```
 
@@ -92,7 +95,7 @@ ar-collections-agent/
 │  └─ demo.py               演示剧本
 ├─ dashboard/index.html     可视化面板
 ├─ data/                    CSV「财务系统」+ outbox + 审计日志
-└─ tests/                   74 项单元测试
+└─ tests/                   112 项测试（conftest.py 屏蔽网络，pytest 离线运行）
 ```
 
 ### 数据文件
