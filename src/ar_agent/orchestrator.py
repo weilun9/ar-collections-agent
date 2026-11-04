@@ -206,6 +206,16 @@ class Orchestrator:
         # ---- 🟡 Medium: 48-hour buffer state machine ----
         if d.tier is Tier.MID:
             buffer_hours = self.cfg.cadence["mid_am_buffer_hours"]
+            # The formal statement goes out once. After it, state is AUTO with the expired buffer still recorded;
+            # without this check the next scan re-notified the AM, started a new buffer and sent another formal email,
+            # every three days with no limit. From here the account manager owns follow-up, and the invoice still
+            # escalates to a person automatically once it ages into high risk.
+            if state is AgentState.AUTO and inv.agent_buffer_until:
+                d.action = ActionType.HOLD
+                d.add_reason("formal reconciliation email already sent after the account manager's buffer; the agent sends "
+                             "it only once, follow-up stays with the account manager until the invoice is paid or escalates")
+                return d
+
             if state is not AgentState.AWAITING_AM or not inv.agent_buffer_until:
                 d.action = ActionType.SLACK_AM_NOTICE
                 d.detail["buffer_until"] = (now + timedelta(hours=buffer_hours)).isoformat(timespec="seconds")

@@ -262,6 +262,15 @@ class TestRouting(ScanCase):
         self.assertIs(d.action, ActionType.HOLD)
         self.assertEqual(len(self.outbox("customer", "INV-2004")), 2)
 
+    def test_mid_tier_formal_email_is_sent_once_then_escalates_on_age(self):
+        """Regression: after the dunning email the AM was re-notified and another formal email followed every 3 days."""
+        for day in range(0, 30):                                      # INV-2007: 5 days overdue at T0 -> 31 on day 26
+            self.orc.daily_scan(now=T0 + timedelta(days=day))
+        self.assertEqual(len(self.outbox("customer", "INV-2007", "MAIL_MID_DUNNING")), 1)
+        self.assertEqual(len(self.outbox("internal", "INV-2007", "SLACK_AM_BUFFER")), 1, "the AM is notified once")
+        self.assertEqual(self.invoice("INV-2007").agent_state, AgentState.ESCALATED.value,
+                         "once it is over 30 days it goes to a person")
+
     def test_light_invoice_that_ages_into_mid_goes_to_the_account_manager(self):
         self.orc.daily_scan(now=T0)                                   # INV-2006: 14 days, light reminder
         rep = self.orc.daily_scan(now=T0 + timedelta(days=1))         # 15 days -> medium
