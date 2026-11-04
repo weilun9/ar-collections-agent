@@ -1,9 +1,9 @@
 """Command-line entry point.
 
 Common commands:
-    python -m ar_agent.cli matrix          show the tiering matrix (takes no action)
-    python -m ar_agent.cli scan            run one daily scan
-    python -m ar_agent.cli dashboard       open the web dashboard
+    python ar.py matrix          show the tiering matrix (takes no action)
+    python ar.py scan            run one daily scan
+    python ar.py dashboard       open the web dashboard
 """
 from __future__ import annotations
 
@@ -102,7 +102,7 @@ def cmd_seed(args) -> None:
     print(f"{GREEN}✓{RESET} Demo data generated (anchor day {anchor})")
     print(f"  {stats['customers']} customers · {stats['invoices']} invoices · {stats['replies']} customer replies")
     print(f"  {DIM}data/customers.csv · data/receivables.csv · data/inbox.csv{RESET}")
-    print(f"\n  Next: {BOLD}python -m ar_agent.cli matrix{RESET}")
+    print(f"\n  Next: {BOLD}python ar.py matrix{RESET}")
 
 
 def cmd_matrix(args) -> None:
@@ -218,7 +218,7 @@ def cmd_scan(args) -> None:
         print(f"{RED}Breaker: {rep.halt_reason}{RESET}")
     print(f"{DIM}run_id={rep.run_id} · full record in data/action_log.csv{RESET}")
     if not live and rep.sends:
-        print(f"{DIM}Message text is in data/outbox/ (see it with: python -m ar_agent.cli outbox){RESET}")
+        print(f"{DIM}Message text is in data/outbox/ (see it with: python ar.py outbox){RESET}")
 
 
 def cmd_takeover(args) -> None:
@@ -434,14 +434,14 @@ def build_parser() -> argparse.ArgumentParser:
         prog="ar", description="AR collections agent",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""Typical flow:
-  python -m ar_agent.cli seed              generate demo data
-  python -m ar_agent.cli matrix -v         show tiering decisions (no actions)
-  python -m ar_agent.cli scan              run one daily scan
-  python -m ar_agent.cli outbox            see what the agent sent
-  python -m ar_agent.cli report            generate the CFO weekly report
-  python -m ar_agent.cli dashboard         open the web dashboard
-  python -m ar_agent.cli ask "..."         ask the read-only assistant (needs AR_LLM_PROVIDER)
-  python -m ar_agent.cli demo             run the full guided demo
+  python ar.py seed              generate demo data
+  python ar.py matrix -v         show tiering decisions (no actions)
+  python ar.py scan              run one daily scan
+  python ar.py outbox            see what the agent sent
+  python ar.py report            generate the CFO weekly report
+  python ar.py dashboard         open the web dashboard
+  python ar.py ask "..."         ask the read-only assistant (needs AR_LLM_PROVIDER)
+  python ar.py demo              run the full guided demo
 """)
     sub = p.add_subparsers(dest="cmd", required=True)
 

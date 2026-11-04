@@ -1,4 +1,4 @@
-"""Case-history summary: the only place in the agent that calls an LLM.
+"""Case-history summary: the only LLM call inside the daily scan (the read-only `ask` assistant in assistant.py is the other LLM use).
 
 The placement is deliberate: the summary is only attached to **internal** high-risk alerts for finance, and takes no part in tiering, policy or sending.
 A model mistake can at worst produce a hard-to-read summary, so the whole module is built to fall back on any failure:
