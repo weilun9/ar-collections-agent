@@ -24,7 +24,7 @@ from .audit import AuditLog
 from .breaker import CircuitBreaker
 from .channels import build_registry
 from .config import Config
-from .inbound import ReplyIntent, classify_reply
+from .inbound import PRIORITY, ReplyIntent, classify_reply
 from .models import (
     ActionType,
     Actor,
@@ -55,6 +55,7 @@ class ScanReport:
     halt_reason: str = ""
     inbound_processed: int = 0
     escalations: list[str] = field(default_factory=list)
+    blocked: list[tuple[str, str, str]] = field(default_factory=list)   # (invoice_id, template_id, why) stopped by the content gate
 
     def count(self, tier: Tier) -> None:
         self.by_tier[tier.value] = self.by_tier.get(tier.value, 0) + 1
@@ -96,9 +97,9 @@ class Orchestrator:
         """
         result: dict[str, tuple[str, str]] = {}
         best_rank: dict[str, int] = {}
-        order = {i.value: n for n, i in enumerate(reversed(
-            [ReplyIntent.UNKNOWN, ReplyIntent.ACK, ReplyIntent.PAID_CLAIM,
-             ReplyIntent.DISPUTE, ReplyIntent.TERMS_CHANGE]))}
+        # Higher rank = higher risk. Built from inbound.PRIORITY (highest risk first) so the two orders cannot drift apart.
+        # (Regression: this ranking was once inverted, so an "ok, noted" reply could mask an earlier instalment request.)
+        order = {i.value: len(PRIORITY) - n for n, i in enumerate(PRIORITY)}
 
         for row in self._read_inbox():
             received = (row.get("received_at") or "").strip()
@@ -205,6 +206,16 @@ class Orchestrator:
         # ---- 🟡 Medium: 48-hour buffer state machine ----
         if d.tier is Tier.MID:
             buffer_hours = self.cfg.cadence["mid_am_buffer_hours"]
+            # The formal statement goes out once. After it, state is AUTO with the expired buffer still recorded;
+            # without this check the next scan re-notified the AM, started a new buffer and sent another formal email,
+            # every three days with no limit. From here the account manager owns follow-up, and the invoice still
+            # escalates to a person automatically once it ages into high risk.
+            if state is AgentState.AUTO and inv.agent_buffer_until:
+                d.action = ActionType.HOLD
+                d.add_reason("formal reconciliation email already sent after the account manager's buffer; the agent sends "
+                             "it only once, follow-up stays with the account manager until the invoice is paid or escalates")
+                return d
+
             if state is not AgentState.AWAITING_AM or not inv.agent_buffer_until:
                 d.action = ActionType.SLACK_AM_NOTICE
                 d.detail["buffer_until"] = (now + timedelta(hours=buffer_hours)).isoformat(timespec="seconds")
@@ -300,7 +311,7 @@ class Orchestrator:
         return sorted(parts)
 
     def summarize_history(self, invoice_id: str) -> str:
-        """Contact-history summary attached to high-risk alerts for finance: the only LLM call in the whole agent.
+        """Contact-history summary attached to high-risk alerts for finance: the only LLM call in the scan pipeline.
 
         With llm.provider configured, a model condenses it into a paragraph and the raw records are kept for checking;
         if it is not configured, the call fails or the summary fails the check, it falls back to the deterministic list. See summarizer.py.
@@ -338,7 +349,16 @@ class Orchestrator:
                     "channel breaker tripped; skipped")
                 return False
             variables = self._vars(d, now)
-            subject, body = tpl.render(template_id, variables)
+            try:
+                subject, body = tpl.render(template_id, variables)
+            except (tpl.TemplateViolation, KeyError) as exc:
+                # Fail closed for this one message, but keep the scan going: a bad variable on one invoice
+                # (e.g. a guarded word in a customer's contact name) must not stop every other invoice being handled.
+                # Not counted as a channel failure: the channel is fine, the content is not.
+                report.blocked.append((inv.invoice_id, template_id, str(exc)))
+                log(d.action.value, channel.name, to, template_id, "blocked", "0",
+                    f"content gate blocked the message: {exc}"[:160])
+                return False
             msg = Message(
                 channel=channel.name, to=to, subject=subject, body=body,
                 template_id=template_id, invoice_id=inv.invoice_id,
@@ -346,7 +366,8 @@ class Orchestrator:
                 variables=variables,
             )
             res = channel.send(msg)
-            tripped = self.breaker.record_send(channel.name, res.ok, now.date())
+            tripped = self.breaker.record_send(channel.name, res.ok, now.date(),
+                                               customer_facing=channel.audience == "customer")
             report.sends.append((channel.name, to, res.ok))
             log(d.action.value, channel.name, to, template_id, res.mode,
                 "1" if res.ok else "0", body[:160].replace("\n", " "))

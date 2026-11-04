@@ -1,0 +1,6 @@
+# Only tool configuration lives here; the project has no build step and no runtime dependencies.
+# Run the app with `python ar.py <command>`.
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
