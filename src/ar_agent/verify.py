@@ -44,7 +44,7 @@ class Checker:
         else:
             self.failed += 1
         mark = f"{GREEN}✓{RESET}" if ok else f"{RED}✗{RESET}"
-        print(f"  {mark} {_pad(layer, 6)}{_pad(name, 60)}{GREY}{detail}{RESET}")
+        print(f"  {mark} {_pad(layer, 8)}{_pad(name, 60)}{GREY}{detail}{RESET}")
 
 
 def run_checks(root: Path) -> int:
@@ -129,8 +129,13 @@ def run_checks(root: Path) -> int:
             return "payment status can only be confirmed by finance"
 
     def l3_allowed_field():
-        orc.store.update_agent_fields("INV-2001", agent_note="self-check write")
-        orc.store.update_agent_fields("INV-2001", agent_note="")
+        original = next(i.agent_note for i in orc.store.load_invoices() if i.invoice_id == "INV-2001")
+        try:
+            orc.store.update_agent_fields("INV-2001", agent_note="self-check write")
+            got = next(i.agent_note for i in orc.store.load_invoices() if i.invoice_id == "INV-2001")
+            assert got == "self-check write", "an allow-listed field was not written"
+        finally:
+            orc.store.update_agent_fields("INV-2001", agent_note=original)   # leave the user's data as it was
         return "fields on the allow-list can be written"
 
     c.check("L3", "Agent cannot change an invoice amount", l3_amount_readonly)
@@ -224,18 +229,33 @@ def run_checks(root: Path) -> int:
         return "all channels dry-run by default (live needs config.live=true and AR_LIVE=1)"
 
     def ch_high_never_outbound():
-        """End to end: run a scan and assert the outbox holds no customer-facing message for any high-risk invoice."""
+        """End to end: run a real (dry-run) scan on a scratch copy of the demo data and assert its outbox holds
+        no customer-facing message for any high-risk invoice. A scratch copy, so the check really sends
+        (to the dry-run outbox) without touching the user's data, and never passes just because the outbox is empty."""
         import json
-        rep = orc.daily_scan(now=datetime(2026, 8, 25, 9, 0), dry_plan=True)
-        high_ids = {d.invoice.invoice_id for d in rep.actions if d.tier is Tier.HIGH}
-        assert high_ids, "precondition failed: this scan has no high-risk invoices"
-        leaked = []
-        for f in (root / "data" / "outbox").glob("*.json"):
-            d = json.loads(f.read_text(encoding="utf-8"))
-            if d.get("audience") == "customer" and d.get("invoice_id") in high_ids:
-                leaked.append(d["invoice_id"])
-        assert not leaked, f"high-risk invoices received customer messages: {sorted(set(leaked))}"
-        return f"{len(high_ids)} high-risk invoices, 0 customer messages"
+        import shutil
+        import tempfile
+        from .seed import seed as seed_data
+
+        scratch = Path(tempfile.mkdtemp(prefix="ar_verify_"))
+        try:
+            shutil.copy(root / "config.json", scratch / "config.json")
+            seed_data(scratch / "data", date(2026, 8, 25))
+            rep = Orchestrator(scratch, cfg).daily_scan(now=datetime(2026, 8, 25, 9, 0))
+            high_ids = {d.invoice.invoice_id for d in rep.actions if d.tier is Tier.HIGH}
+            assert high_ids, "precondition failed: this scan has no high-risk invoices"
+            customer_msgs, leaked = 0, []
+            for f in (scratch / "data" / "outbox").glob("*.json"):
+                d = json.loads(f.read_text(encoding="utf-8"))
+                if d.get("audience") == "customer":
+                    customer_msgs += 1
+                    if d.get("invoice_id") in high_ids:
+                        leaked.append(d["invoice_id"])
+            assert customer_msgs, "precondition failed: the scan sent no customer messages at all"
+            assert not leaked, f"high-risk invoices received customer messages: {sorted(set(leaked))}"
+        finally:
+            shutil.rmtree(scratch, ignore_errors=True)
+        return f"{len(high_ids)} high-risk invoices, 0 of {customer_msgs} customer messages went to them"
 
     c.check("Channel", "Internal and customer audiences are isolated", ch_audience_isolation)
     c.check("Channel", "Everything dry-run by default; nothing sent by accident", ch_default_dry_run)
