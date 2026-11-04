@@ -51,12 +51,17 @@ class CircuitBreaker:
     def is_tripped(self, channel: str) -> bool:
         return channel in self.state.tripped
 
-    def record_send(self, channel: str, ok: bool, on_date: date) -> bool:
-        """Record one send result. Returns True if this call tripped the breaker."""
+    def record_send(self, channel: str, ok: bool, on_date: date, customer_facing: bool = True) -> bool:
+        """Record one send result. Returns True if this call tripped the breaker.
+
+        Only successful customer-facing sends count toward the daily send cap (P-05): the cap bounds how many
+        customers can be contacted in a day, and internal alerts must not use up that budget (or be limited by it).
+        """
         if ok:
             self.state.consecutive_failures[channel] = 0
-            key = on_date.isoformat()
-            self.state.sends_by_date[key] = self.state.sends_by_date.get(key, 0) + 1
+            if customer_facing:
+                key = on_date.isoformat()
+                self.state.sends_by_date[key] = self.state.sends_by_date.get(key, 0) + 1
             return False
 
         n = self.state.consecutive_failures.get(channel, 0) + 1

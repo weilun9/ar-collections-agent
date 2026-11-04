@@ -216,6 +216,8 @@ def cmd_scan(args) -> None:
         print(f"{YELLOW}Breaker: {rep.deferred} invoices deferred to the next batch{RESET}")
     if rep.halted:
         print(f"{RED}Breaker: {rep.halt_reason}{RESET}")
+    for inv_id, template_id, why in rep.blocked:
+        print(f"{RED}Content gate blocked {template_id} for {inv_id}: {why}{RESET}")
     print(f"{DIM}run_id={rep.run_id} · full record in data/action_log.csv{RESET}")
     if not live and rep.sends:
         print(f"{DIM}Message text is in data/outbox/ (see it with: python ar.py outbox){RESET}")

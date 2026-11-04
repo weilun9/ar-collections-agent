@@ -191,7 +191,7 @@ TEMPLATES: dict[str, Template] = {
 def _guard(text: str, template_id: str) -> None:
     """Content gate before sending (second layer of defence in depth)."""
     for pattern, why in FORBIDDEN_PATTERNS:
-        m = re.search(pattern, text)
+        m = re.search(pattern, text, re.IGNORECASE)   # "Installment" / "DISCOUNT" must not slip through
         if m:
             raise TemplateViolation(
                 f"template {template_id} rendered forbidden wording '{m.group(0)}': {why}"
